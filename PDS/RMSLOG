@@ -1,0 +1,2206 @@
+RMSLOG   CSECT
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        RMSLOG                                              */
+*/*                                                                  */
+*/* Function:    ZRMS subsystem report log routine                   */
+*/*                                                                  */
+*/* Description: Receives control from frontend and backend          */
+*/*              service routines to log monitored SVC data.         */
+*/*                                                                  */
+*/* Input Regs:  R1  SVX address                                     */
+*/*              R13 savearea address                                */
+*/*              R14 return address                                  */
+*/*              R15 entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R6  DCB  address                                    */
+*/*              R7  SVX  address                                    */
+*/*              R8  SVR  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 LGXE address                                    */
+*/*              R13 savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/* Attributes:  TCB mode                                            */
+*/*              Primary mode                                        */
+*/*              Reentrant                                           */
+*/*              Caller key                                          */
+*/*              Caller state                                        */
+*/*              Page-fixed                                          */
+*/*              Write-protected                                     */
+*/*              Dynamic-LPA resident                                */
+*/*                                                                  */
+*/* Copyright:   Ben Marino. 2021 - 2023 (unpublished)               */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @01 | V1R1 | 09242022 | Ben Marino  | Initial version               *
+* @02 | V1R1 | 02102023 | Ben Marino  | Serviceability enhancements   *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+RMSLOG   AMODE 31
+RMSLOG   RMODE ANY
+         COPY  ZGBLS
+         STM   R14,R12,GPR@R14(R13)
+         USING RMSLOG,R15
+         B     SVRINIT
+         ZMACS GEN=MID                 MID
+         DROP  R15
+*
+SVRINIT  DS    0H
+         LR    R10,R15
+         USING RMSLOG,R10
+         LR    R7,R1                   SVX
+         USING SVX,R7
+         CLC   SVXID,=CL4'SVX'         SVX?
+         BNE   SVREXIT                 no
+         L     R9,SVXSVCEA             SVCE
+         USING SVCE,R9
+         CLC   SVCEID,=CL4'SVCE'       SVCE?
+         BNE   SVREXIT                 no
+         L     R11,SVCESVTA            ZSVT
+         USING ZSVT,R11
+         CLC   ZSVTID,=CL4'ZSVT'       SZVT?
+         BNE   SVREXIT                 no
+         L     R12,SVCELGXE            LGXE
+         USING LGXE,R12
+         CLC   LGXEID,=CL4'LGXE'       LGXE?
+         BE    SVR0000                 yes
+         ZTRCE LOG=0,LINKAGE=LOCAL     trace
+         B     SVREXIT                 exit
+*
+SVR0000  DS    0H
+         LA    R6,LGXEDCB              DCB
+         USING IHADCB,R6
+         LA    R1,SVXLGSVE             savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         LA    R8,SVXSVRDA             SVR record address
+         USING SVR,R8
+         ZTRCE LOG=1,LINKAGE=LOCAL     trace
+         MVC   SVRTRTAB,TRTABLE        translate table
+*
+**       Update entry count
+*
+SVR0010  DS    0H
+         L     R2,ZSVTLOGC             logger count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZSVTLOGC          update count
+         BNE   SVR0010                 changed: try again
+*
+**       Serialize RMSLOG resource
+*
+         LA    R2,SVCESUBN             major
+         LA    R3,SVCELOGM             minor
+         MVC   SVXPLIST(LOGENQL),LOGENQ
+         ENQ   ((R2),(R3)),MF=(E,SVXPLIST)
+         OI    SVXFLG3,SVX@LOGQ        set indicator
+         ZTRCE LOG=2,LINKAGE=LOCAL     trace
+*
+**       Open MONLOG log dataset
+*
+         TM    SVCEFLG1,SVCE@OFL       Open failed?
+         BZ    SVR0020                 no
+         ZTRCE LOG=3,LINKAGE=LOCAL     trace
+         B     SVR0099
+*
+SVR0020  DS    0H
+         TM    SVCEFLG1,SVCE@OPN       log opened?
+         BNZ   SVR0030                 yes
+         ZTRCE LOG=4,LINKAGE=LOCAL     trace
+         ZCALL SR=OPNLOG               no
+         TM    SVCEFLG1,SVCE@OPN       opened?
+         BNZ   SVR0030                 yes
+         ZTRCE LOG=5,LINKAGE=LOCAL     trace
+         B     SVR0099
+*
+**       Initialize SVR data record
+*
+SVR0030  DS    0H
+         CLC   SVXSRID,=CL3'&LOGINI'   INI request?
+         BNE   SVR0050                 no
+         XC    SVR(SVR@ZERO),SVR       scrub SVR
+         XC    SVRCLR(SVR@ZEND),SVRCLR scrub section2
+         MVC   SVRID,=CL4'SVR'         ID SVR
+*
+**       Update SVC issued sequnce number
+*
+SVR0040  DS    0H
+         L     R14,SVCESEQN            sequence number
+         LA    R15,1(,R14)             add one
+         CS    R14,R15,SVCESEQN        update sequence number
+         BNE   SVR0040                 changed: try again
+         ZCALL SR=INISVR               write record
+         ZTRCE LOG=6,LINKAGE=LOCAL     trace
+         B     SVR0099
+*
+**       Finalize SVR data record
+*
+SVR0050  DS    0H
+         CLC   SVXSRID,=CL3'&LOGEND'   END request?
+         BNE   SVR0060                 no
+         ZCALL SR=ENDSVR               write record
+         ZTRCE LOG=7,LINKAGE=LOCAL     trace
+*
+**       Log SVR data record
+*
+         ICM   R15,7,DCBPUTA           still opened?
+         BZ    SVR0099                 no
+         ZCALL SR=LOGSVR               log record
+         ZTRCE LOG=8,LINKAGE=LOCAL     trace
+*
+**       Write SMF record
+*
+         TM    SVCEFLG2,SVCE@SMF       SMF=YES?
+         BZ    SVR0099                 no
+         TM    ZSVTFLG2,ZSVT@SMF       SMF recording required?
+         BZ    SVR0099                 no
+         ZCALL SR=SMFLOG               log SMF record
+         ZTRCE LOG=9,LINKAGE=LOCAL     trace
+         B     SVR0099                 exit
+*
+**       Terminate logging
+*
+SVR0060  DS    0H
+         CLC   SVXSRID,=CL3'&LOGTRM'   TRM request?
+         BNE   SVR0099                 no
+         MVC   LGXELOGR,LOGREC         init record
+         ZMACS GEN=CNVD,SVRVAR,LGXERECS,DWORD=SVRDWORD
+         MVC   LGXELOGR+26(8),SVRVAR   show record count
+         ZLOGS (R6),LGXELOGR           write
+         MVC   LGXELOGR,TRMREC         init record
+         ZLOGS (R6),LGXELOGR           write
+         ZTRCE LOG=$,LINKAGE=LOCAL     trace
+*
+**       Close MONLOG dataset
+*
+SVR0080  DS    0H
+         OI    SVCEFLG1,SVCE@OFL       donot reOPEN log
+         OI    SVCEFLG1,SVCE@CLS       set closed indicator
+         NI    SVCEFLG1,XFF-SVCE@OPN   log is now closed
+         CLOSE ((R6)),MODE=31,MF=(E,LGXECLFM)
+         ZTRCE LOG=#,LINKAGE=LOCAL     trace
+*
+**       Release MONLOG serialization
+*
+SVR0099  DS    0H
+         TM    SVXFLG3,SVX@LOGQ        DEQ required?
+         BZ    SVREXIT                 no, exit
+         LA    R2,SVCESUBN             major
+         LA    R3,SVCELOGM             minor
+         MVC   SVXPLIST(LOGDEQL),LOGDEQ
+         DEQ   ((R2),(R3)),MF=(E,SVXPLIST)
+         NI    SVXFLG3,XFF-SVX@LOGQ    reset indicator
+         ZTRCE LOG=@,LINKAGE=LOCAL     trace
+*---------------------------------------------------------------------*
+*        Exit Routine                                                 *
+*--------+---------+---------+---------+---------+---------+---------+*
+SVREXIT  DS    0H
+         L     R13,GPR@BWD(,R13)       savearea
+         LM    R14,R12,GPR@R14(R13)    restore regs
+         BSM   0,R14                   return
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+LOGENQ   ENQ   (0,0,E,8,STEP),RET=HAVE,MF=L
+LOGENQL  EQU   *-LOGENQ
+         DS    0F
+LOGDEQ   DEQ   (0,0,8,STEP),MF=L
+LOGDEQL  EQU   *-LOGDEQ
+         DS    0C
+TRTABLE  DC    CL16'0123456789ABCDEF'
+         DS    0C
+LOGREC   DC    CL80' *** MONITORED RESOURCES: 00000000  ***'
+TRMREC   DC    CL80' *** END OF RESOURCE MONITOR REPORT ***'
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        OPNLOG                                              */
+*/*                                                                  */
+*/* Function:    MONLOG log open subroutine                          */
+*/*                                                                  */
+*/* Input Regs:  R6  DCB  address                                    */
+*/*              R7  SVX  address                                    */
+*/*              R8  SVR  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R13 save area address                               */
+*/*              R14 return address                                  */
+*/*              R15 entry point address                             */
+*/*                                                                  */
+*/* Regs Usage:  R6  DCB  address                                    */
+*/*              R7  SVX  address                                    */
+*/*              R8  SVR  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 LGXE address                                    */
+*/*              R13 save area address                               */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+OPNLOG   DS    0H
+         USING IHADCB,R6
+         USING SVX,R7
+         USING SVR,R8
+         USING SVCE,R9
+         USING ZSVT,R11
+         USING LGXE,R12
+         B     12(,R15)
+         DC    CL8'OPNLOG'             ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15
+         USING OPNLOG,R10              base address
+         LA    R1,SVXLGSSA             subroutine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         ZTRCE LOG=A,LINKAGE=LOCAL     trace
+*
+**       Locate MONLOG DD name
+*
+         USING PSA,0
+         L     R4,PSATOLD              TCB
+         USING TCB,R4
+         CLC   PSATOLD,TCBJSTCB        jobstep?
+         BNE   OPN0010                 no
+         ICM   R3,15,TCBTIO            TIOT?
+         BZ    OPN0010                 no
+         USING TIOT,R3
+         XR    R2,R2
+         ICM   R2,1,TIOELNGH           any DDs?
+         BZ    OPN0010                 no
+         LA    R3,TIOENTRY             1st DD entry
+         USING TIOENTRY,R3
+         ZTRCE LOG=B,LINKAGE=LOCAL     trace
+*
+OPN0000  DS    0H
+         CLI   0(R3),X'00'             last DD?
+         BE    OPN0010                 yes
+         CLC   TIOEDDNM,SVCELDDN       DD match?
+         BE    OPN0020                 yes
+         LA    R3,0(R2,R3)             next DD
+         B     OPN0000                 loop
+         DROP  R3,R4
+*
+OPN0010  DS    0H
+         ZTRCE LOG=C,LINKAGE=LOCAL     trace
+         B     OPENXIT                 exit
+*
+**       Open MONLOG dataset
+*
+OPN0020  DS    0H
+         MVC   DCBDDNAM,SVCELDDN       DD name
+         OPEN  ((R6),OUTPUT),MODE=31,MF=(E,LGXEOLFM)
+         TM    DCBOFLGS,DCBOFOPN       successful?
+         BNZ   OPN0030                 yes
+         OI    SVCEFLG1,SVCE@OFL       no
+         ZTRCE LOG=D,LINKAGE=LOCAL     trace
+         B     OPENXIT                 no, exit
+*
+OPN0030  DS    0H
+         MVC   SVCEOTCB,PSATOLD        OPEN owner TCB
+         MVC   SVCEOASC,PSAAOLD        OPEN owner ASCB
+         OI    SVCEFLG1,SVCE@OPN       log opened
+         ZTRCE LOG=E,LINKAGE=LOCAL     trace
+*
+**       Log HEADER record
+*
+         MVC   LGXELOGR,LOGHDR0        header record
+         ZLOGS (R6),LGXELOGR           write
+*
+**       Log BLANK line
+*
+         MVC   LGXELOGR,ZSVTBLKS       blanks
+         ZLOGS (R6),LGXELOGR           write record
+*
+**       Log JOB record
+*
+         LA    R2,LGXELOGR             record address
+         USING ZJOB,R2
+         MVC   ZJOBREC(ZJOB@SZE),JOBHDR1
+         MVC   ZJOBTYPE(3),SVCEJTYP    {JOB|STC|TSU}
+         MVC   ZJOBNAME,SVCEJOBN       job name
+         ZLOGS (R6),(R2)               write
+*
+**       Log STEP record
+*
+         LA    R2,LGXELOGR             record address
+         USING ZSTEP,R2
+         MVC   ZSTPREC(ZSTP@SZE),STPHDR1
+         MVC   ZSTPNAME,=CL8'N/A'      step name
+         L     R4,PSATOLD              TCB
+         USING TCB,R4
+         ICM   R4,15,TCBTIO            TIOT init?
+         BZ    OPN0040                 no
+         USING TIOT,R4
+         MVC   ZSTPNAME,TIOCSTPN       copy step name
+         ZLOGS (R6),(R2)               write
+         DROP  R4
+*
+**       Log SYSTEM record
+*
+OPN0040  DS    0H
+         LA    R2,LGXELOGR             record address
+         USING ZHD1,R2
+         MVC   ZHD1REC(ZHD1@SZE),LOGHDR1
+         MVC   ZHD1SYS,SVCESYSN        system ID
+         ZLOGS (R6),(R2)               write
+*
+**       Log SYSOPTS record
+*
+         LA    R2,LGXELOGR             record address
+         USING ZHD5,R2
+         MVC   ZHD5REC(ZHD5@SZE),LOGHDR5
+         MVC   ZHD5SVCD,ZSVTSVCD       SVC=nnn sys-option
+         MVC   ZHD5SMFD,ZSVTSMFD       SMF={NO|nnn} sys-option
+         ZLOGS (R6),(R2)               write
+*
+**       Log OPTIONS record
+*
+         LA    R2,LGXELOGR             record address
+         USING ZHD2,R2
+         MVC   ZHD2REC(ZHD2@SZE),LOGHDR2
+         MVC   ZHD2SDD,SVCEGDDN        SUBDD=DDname
+         MVC   ZHD2LOG,SVCELDDN        LOGDD=DDname
+         MVC   ZHD2LRPT,SVCELRPT       RPT={S|D} option
+         MVC   ZHD2LSMF,SVCELSMF       SMF={Y|N} option
+         MVC   ZHD2LRUN,SVCELRUN       RUN={S|J} option
+         ZLOGS (R6),(R2)               write
+*
+**       Log SVCs record
+*
+         LA    R2,LGXELOGR             record address
+         USING ZHD4,R2
+         MVC   ZHD4REC(ZHD4@SZE),LOGHDR4
+         MVC   ZHD4SVCI,SVCESVCA       screened SVCs
+         ZLOGS (R6),(R2)               write
+*
+**       Log SPs record
+*
+         TM    SVCEFLG2,SVCE@SPN       SPNTAB init?
+         BZ    OPN0099                 no
+         LA    R2,LGXELOGR             record address
+         USING ZHD3,R2
+         MVC   ZHD3REC(ZHD3@SZE),LOGHDR3
+         MVC   ZHD3SPID,SVCESPDA       screened subpools
+         ZLOGS (R6),(R2)               write
+*
+**       Log BLANK record
+*
+OPN0099  DS    0H
+         MVC   LGXELOGR,ZSVTBLKS       blanks
+         ZLOGS (R6),LGXELOGR           write record
+         ZTRCE LOG=F,LINKAGE=LOCAL     trace
+*
+**       Subroutine Exit
+*
+OPENXIT  DS    0H
+         L     R13,GPR@BWD(,R13)       mainline save area
+         LM    R14,R12,GPR@R14(R13)    restore mainline regs
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0C
+LOGHDR0  DS    0CL80
+         DC    CL24' '
+         DC    CL56'S V C  A U D I T  L O G'
+LOG@HD0L EQU   *-LOGHDR0
+*
+JOBHDR1  DS    0CL80
+         DC    CL01' '
+         DC    CL09'JOB:'
+         DC    CL08'jobname'
+         DC    CL62' '
+JOB@HD1L EQU   *-JOBHDR1
+*
+STPHDR1  DS    0CL80
+         DC    CL01' '
+         DC    CL09'STEP:'
+         DC    CL08'stepname'
+         DC    CL62' '
+STP@HD1L EQU   *-STPHDR1
+*
+LOGHDR1  DS    0CL80
+         DC    CL01' '
+         DC    CL09'SYSTEM:'
+         DC    CL08'CBT'
+         DC    CL62' '
+LOG@HD1L EQU   *-LOGHDR1
+*
+LOGHDR2  DS    0CL80
+         DC    CL01' '
+         DC    CL08'MONITOR:'
+         DC    CL07' SUBDD='
+         DC    CL08' '
+         DC    CL07' LOGDD='
+         DC    CL08' '
+         DC    CL05' RPT='
+         DC    CL01' '
+         DC    CL05' SMF='
+         DC    CL01' '
+         DC    CL05' RUN='
+         DC    CL01' '
+         DC    CL23' '
+LOG@HD2L EQU   *-LOGHDR2
+*
+LOGHDR3  DS    0CL80
+         DC    CL01' '
+         DC    CL09'MONITOR:'
+         DC    CL70' '
+LOG@HD3L EQU   *-LOGHDR3
+*
+LOGHDR4  DS    0CL80
+         DC    CL01' '
+         DC    CL09'MONITOR:'
+         DC    CL60' '
+         DC    CL10' '
+LOG@HD4L EQU   *-LOGHDR4
+*
+LOGHDR5  DS    0CL80
+         DC    CL01' '
+         DC    CL08'OPTIONS:'
+         DC    CL05' SVC='
+         DC    CL03' '
+         DC    CL05' SMF='
+         DC    CL03' '
+         DC    CL55' '
+LOG@HD5L EQU   *-LOGHDR5
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        INISVR                                              */
+*/*                                                                  */
+*/* Function:    Log record initialization subroutine                */
+*/*                                                                  */
+*/* Input Regs:  R6  DCB  address                                    */
+*/*              R7  SVX  address                                    */
+*/*              R8  SVR  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R13 save area address                               */
+*/*              R14 return address                                  */
+*/*              R15 entry point address                             */
+*/*                                                                  */
+*/* Regs Usage:  R6  DCB  address                                    */
+*/*              R7  SVX  address                                    */
+*/*              R8  SVR  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 LGXE address                                    */
+*/*              R13 save area address                               */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+INISVR   DS    0H
+         USING IHADCB,R6
+         USING SVX,R7
+         USING SVR,R8
+         USING SVCE,R9
+         USING ZSVT,R11
+         USING LGXE,R12
+         B     12(,R15)
+         DC    CL8'INISVR'             ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15
+         USING INISVR,R10              base address
+         LA    R1,SVXLGSSA             subroutine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+*
+**       Capture SVC number
+*
+         XR    R1,R1
+         IC    R1,SVXSVCNM             SVC number
+         ST    R1,SVRWORD              fullword
+         ZMACS GEN=CNVD,SVRVAR,SVRWORD,DWORD=SVRDWORD
+         MVC   SVRSVCN,SVRVAR+5        save it
+         ZTRCE LOG=G,LINKAGE=LOCAL     trace
+*
+**       Capture SVC macro name
+*
+         XR    R3,R3
+         IC    R3,SVXSVCNM             get SVC number
+         SLL   R3,5                    multiply by 32
+         L     R1,SVCESVNA             SVCNTAB table
+         LA    R3,0(R1,R3)             macro name entry
+         USING SVNX,R3
+         MVC   SVRMACRO,SVNXNAME       copy macro name
+*
+**       Capture issued SVC sequence
+*
+         ZMACS GEN=CNVD,SVRVAR,SVCESEQN,DWORD=SVRDWORD
+         MVC   SVRSEQNT,SVRVAR         issued SVC sequence number
+*
+**       Update SVC sequnce number
+*
+         XR    R1,R1
+         ICM   R1,B'0111',SVNXSCNT     SVC issued count
+         LA    R1,1(,R1)               add one
+         STCM  R1,B'0111',SVNXSCNT     update issued count
+         ST    R1,SVRWORD
+         ZMACS GEN=CNVD,SVRVAR,SVRWORD,DWORD=SVRDWORD
+         MVC   SVRCOUNT,SVRVAR+2       save it
+         DROP  R3
+*
+**       Capture SVC time & date
+*
+         TIME  BIN
+         ST    R0,SVRTIME              SVC issued time
+         ST    R1,SVRDATE              SVC issued date
+*
+**       Capture SVC Type
+*
+         LA    R3,SVXSVCEN             SVC entry
+         USING SVCENTRY,R3
+         CLI   SVCTP,SVCTP1            T1 SVC?
+         BNE   INI0010                 no
+         MVI   SVRTYPE,C'1'            yes
+         B     INI0040                 carry on
+*
+INI0010  DS    0H
+         CLI   SVCTP,SVCTP2            T2 SVC?
+         BNE   INI0020                 no
+         MVI   SVRTYPE,C'2'            yes
+         B     INI0040                 carry on
+*
+INI0020  DS    0H
+         CLI   SVCTP,SVCTP34           T3/4 SVC?
+         BNE   INI0030                 no
+         MVI   SVRTYPE,C'3'            yes
+         B     INI0040                 carry on
+*
+INI0030  DS    0H
+         CLI   SVCTP,SVCTP6            T6 SVC?
+         BNE   INI0040                 no
+         MVI   SVRTYPE,C'6'            yes
+*
+**       Capture SVC attributes
+*
+INI0040  DS    0H
+         MVC   SVRAPF,=CL3'NO'
+         TM    SVCTP,SVCAPF            APF-authorized?
+         BZ    INI0050                 no
+         MVC   SVRAPF,=CL3'YES'        yes
+         B     INI0070                 carry on
+*
+INI0050  DS    0H
+         MVI   SVRNONP,C'N'
+         TM    SVCTP,SVCNP             non-preemptive?
+         BZ    INI0060                 no
+         MVI   SVRNONP,C'Y'            yes
+         B     INI0070                 carry on
+*
+INI0060  DS    0H
+         MVI   SVRAR,C'N'
+         TM    SVCATTR3,SVCAR          AR-mode allowed?
+         BZ    INI0070                 no
+         MVI   SVRAR,C'Y'              yes
+*
+**       Capture SVC locks
+*
+INI0070  DS    0H
+         MVC   SVRLOCK,=CL8'NONE'
+         TM    SVCLOCKS,SVCLL          LOCAL lock needed?
+         BZ    INI0080                 no
+         MVC   SVRLOCK,=CL8'LOCAL'     yes
+         B     INI0120                 carry on
+*
+INI0080  DS    0H
+         TM    SVCLOCKS,SVCCMS         CMS lock needed?
+         BZ    INI0090                 no
+         MVC   SVRLOCK,=CL8'CMS'       yes
+         B     INI0120                 carry on
+*
+INI0090  DS    0H
+         TM    SVCLOCKS,SVCOPT         OPT lock needed?
+         BZ    INI0100                 no
+         MVC   SVRLOCK,=CL8'OPT'       yes
+         B     INI0120                 carry on
+*
+INI0100  DS    0H
+         TM    SVCLOCKS,SVCALLOC       SALLOC lock needed
+         BZ    INI0110                 no
+         MVC   SVRLOCK,=CL8'SALLOC'    yes
+         B     INI0120                 carry on
+*
+INI0110  DS    0H
+         TM    SVCLOCKS,SVCDISP        DISP lock needed
+         BZ    INI0120                 no
+         MVC   SVRLOCK,=CL8'DISP'      yes
+*
+**       Capture SVC entry CPU
+*
+INI0120  DS    0H
+         USING PSA,0
+         LH    R1,PSACPULA             logical CPU
+         ST    R1,SVRWORD              fullword
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRCPILA,SVRVAR+4       save it
+*
+         LH    R1,PSACPUPA             physical CPU
+         ST    R1,SVRWORD              fullword
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRCPIPA,SVRVAR+4       save it
+*
+**       Capture workunit type
+*
+         MVC   SVRBTYPE,=CL4'PRB'
+         TM    SVXFLG3,SVX@SVRB        issued by SVRB caller?
+         BZ    INI0130                 no
+         MVC   SVRBTYPE,=CL4'SVRB'     yes
+*
+**       Capture caller authorization
+*
+INI0130  DS    0H
+         L     R4,PSATOLD              TCB
+         USING TCB,R4
+         L     R3,TCBJSCB              JSCB address
+         USING IEZJSCB,R3
+         MVC   SVRAC01,=CL5'AC(0)'     SETCODE AC(0)
+         TM    JSCBOPTS,JSCBAUTH       authorized caller?
+         BZ    INI0140                 no
+         MVC   SVRAC01,=CL5'AC(1)'     SETCODE AC(1)
+         DROP  R4
+*
+**       Capture caller system state
+*
+INI0140  DS    0H
+         LA    R5,SVXCPSW              caller PSW
+         USING PSW,R5
+         MVC   SVRSTATE,=CL12'Problem;'
+         TM    PSWBYTE1,PSWPROB        problem state?
+         BNZ   INI0150                 yes
+         MVC   SVRSTATE,=CL12'Supervisor;'
+*
+**       Capture caller protect key
+*
+INI0150  DS    0H
+         XR    R1,R1
+         IC    R1,PSWBYTE1             protect key
+         SRL   R1,4                    shit out state bits
+         SLL   R1,4                    fix protect key
+         ST    R1,SVRWORD
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRPKEY,SVRVAR+6        save key
+         DROP  R5
+*
+**       Capture JOBname/STEPname
+*
+INI0160  DS    0H
+         L     R3,PSAAOLD              ASCB
+         USING ASCB,R3
+         MVC   SVRJOBNM,SVCEJOBN       job name
+         MVC   SVRSTEPN,=CL8'*UNKNOWN' step name
+         L     R4,PSATOLD              TCB
+         USING TCB,R4
+         ICM   R4,15,TCBTIO            TIOT init?
+         BZ    INI0170                 no
+         USING TIOT,R4
+         MVC   SVRSTEPN,TIOCSTPN       copy step name
+         DROP  R3,R4
+*
+**       Capture program EPA
+*
+INI0170  DS    0H
+         L     R3,SVXRBA               caller RB
+         USING RBSECT,R3
+         ICM   R3,7,RBCDE1             CDE init?
+         BZ    INI0180                 yes
+         USING CDENTRY,R3
+         ZMACS GEN=CNVX,SVRVAR,CDENTPT,TR=SVRTRTAB
+         MVC   SVRPGMEP,SVRVAR         save it
+*
+**       Find program using CSVQUERY
+*
+INI0180  DS    0H
+         MVC   SVRDWORD,SVXCPSW        caller PSW
+         LA    R5,SVRDWORD             PSW address
+         USING PSW,R5
+         NI    PSWIA,XFF-PSWAMODE31    turn off AMODE bit
+         MVC   SVRWORD,SVRDWORD+4      PSW NSI
+         DROP  R5
+         CSVQUERY INADDR=SVRWORD,SEARCH=JPALPA,SEARCHMINOR=YES,        +
+               OUTEPNM=SVREPNM,OUTMJNM=SVRMJNM,                        +
+               OUTLOADPT=SVRLODPT,OUTEPA=SVREPA,                       +
+               OUTATTR1=SVRATTR1,OUTATTR2=SVRATTR2,OUTATTR3=SVRATTR3,  +
+               PLISTVER=MAX,DIRLOAD=YES,RETCODE=SVRRC,                 +
+               MF=(E,SVRPLIST,COMPLETE)
+         LTR   R15,R15                 successful?
+         BNZ   INI0190                 no, use NUCLKUP
+         ZMACS GEN=CNVX,SVRVAR,SVREPA,TR=SVRTRTAB
+         MVC   SVRPGMEP,SVRVAR         save it
+         ZMACS GEN=CNVX,SVRVAR,SVRLODPT,TR=SVRTRTAB
+         MVC   SVRLODEP,SVRVAR         save it
+         B     INI0200                 carry on
+*
+**       Find program using NUCLKUP
+*
+INI0190  DS    0H
+         MVC   SVRDWORD,SVXCPSW        caller PSW
+         LA    R5,SVRDWORD             PSW address
+         USING PSW,R5
+         NI    PSWIA,XFF-PSWAMODE31    turn off AMODE bit
+         MVC   SVRWORD,SVRDWORD+4      PSW NSI
+         DROP  R5
+         NUCLKUP BYADDR,ADDR=SVREPA,NAME=SVRMJNM
+         ST    R15,SVRRC               save RC
+         LTR   R15,R15                 successful?
+         BNZ   INI0200                 no, leave blank
+         ZMACS GEN=CNVX,SVRVAR,SVREPA,TR=SVRTRTAB
+         MVC   SVRPGMEP,SVRVAR         save it
+*
+**       Capture program offset
+*
+INI0200  DS    0H
+         MVC   SVRDWORD,SVXCPSW        caller PSW
+         LA    R5,SVRDWORD             PSW address
+         USING PSW,R5
+         NI    PSWIA,XFF-PSWAMODE31    turn off AMODE bit
+         MVC   SVRWORD,SVRDWORD+4      PSW NSI
+         MVC   SVROFSET,SVRWORD        copy NSI
+         DROP  R5
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRPGMOF,SVRVAR         save it
+*
+**       Capture access registers
+*
+         ZMACS GEN=CNVX,SVRVAR,SVXIAR0,TR=SVRTRTAB
+         MVC   SVRIAR0,SVRVAR          save it
+         ZMACS GEN=CNVX,SVRVAR,SVXIAR1,TR=SVRTRTAB
+         MVC   SVRIAR1,SVRVAR          save it
+         ZMACS GEN=CNVX,SVRVAR,SVXIAR14,TR=SVRTRTAB
+         MVC   SVRIAR14,SVRVAR         save it
+         ZMACS GEN=CNVX,SVRVAR,SVXIAR15,TR=SVRTRTAB
+         MVC   SVRIAR15,SVRVAR         save it
+*
+**       Capture general registers
+*
+         ZMACS GEN=CNVX,SVRVAR,SVXIHR0,TR=SVRTRTAB
+         MVC   SVRIHR0,SVRVAR          save it
+         ZMACS GEN=CNVX,SVRVAR,SVXILR0,TR=SVRTRTAB
+         MVC   SVRILR0,SVRVAR          save it
+*
+         ZMACS GEN=CNVX,SVRVAR,SVXIHR1,TR=SVRTRTAB
+         MVC   SVRIHR1,SVRVAR          save it
+         ZMACS GEN=CNVX,SVRVAR,SVXILR1,TR=SVRTRTAB
+         MVC   SVRILR1,SVRVAR          save it
+*
+         ZMACS GEN=CNVX,SVRVAR,SVXIHR14,TR=SVRTRTAB
+         MVC   SVRIHR14,SVRVAR         save it
+         ZMACS GEN=CNVX,SVRVAR,SVXILR14,TR=SVRTRTAB
+         MVC   SVRILR14,SVRVAR         save it
+*
+         ZMACS GEN=CNVX,SVRVAR,SVXIHR15,TR=SVRTRTAB
+         MVC   SVRIHR15,SVRVAR         save it
+         ZMACS GEN=CNVX,SVRVAR,SVXILR15,TR=SVRTRTAB
+         MVC   SVRILR15,SVRVAR         save it
+*
+**       Convert UTC to LOCAL clock
+*
+         L     R1,FLCCVT               CVT
+         USING CVT,R1
+         L     R1,CVTEXT2              CVT extension
+         USING CVTXTNT2,R1
+         STCK  SVRSTCK                 UTC/GMT clock value
+         LM    R2,R3,SVRSTCK           load clock value
+         LM    R4,R5,CVTLDTO           load offset value
+         ALR   R3,R5                   add time offset
+         ALCR  R2,R4                   add w/carry offset
+         LM    R4,R5,CVTLSO            load leap seconds
+         SLR   R3,R5                   subtract leap seconds
+         SLBR  R2,R4                   subtract w/borrow leap seconds
+         STM   R2,R3,SVRSTCK           store LOCAL time clock
+*
+**       Convert LOCAL clock to decimal
+*
+         MVC   SVRCCONV(STCK@ILN),STCKILST
+         STCKCONV STCKVAL=SVRSTCK,                                     +
+               CONVVAL=SVRISTCK,TIMETYPE=DEC,DATETYPE=MMDDYYYY,        +
+               MF=(E,SVRCCONV)
+*
+**       Capture time and date
+*
+         LA    R3,SVRTMAP              TMAP addrss
+         USING TMAP,R3
+         MVC   TIMESTR,TMODEL          time & date skeleton
+         MVC   SVRWORD,SVRISTCK        time
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   TIMEHH,SVRVAR           show hours
+         MVC   TIMEMM,SVRVAR+2         show minutes
+         MVC   TIMESS,SVRVAR+4         show seconds
+         MVC   TIMETH,SVRVAR+6         show hundreds
+         MVC   SVRWORD,SVRISTCK+8      date
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   DATEMM,SVRVAR           month
+         MVC   DATEDD,SVRVAR+2         day
+         MVC   DATEYY,SVRVAR+4         year
+         MVC   SVRTIMED,TIMESTR        init time & date
+         ZTRCE LOG=H,LINKAGE=LOCAL     trace
+*
+**       Subroutine Exit
+*
+INIEXIT  DS    0H
+         L     R13,GPR@BWD(,R13)       mainline save area
+         LM    R14,R12,GPR@R14(R13)    restore mainline regs
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+STCKILST STCKCONV MF=L
+STCK@ILN EQU   *-STCKILST
+         DS    0C
+TMODEL   DC    CL38'hh:mm:ss:th mm/dd/yyyy'
+TMODL@SZ EQU   *-TMODEL
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        ENDSVR                                              */
+*/*                                                                  */
+*/* Function:    SVR record completion subroutine                    */
+*/*                                                                  */
+*/* Input Regs:  R6  DCB  address                                    */
+*/*              R7  SVX  address                                    */
+*/*              R8  SVR  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R13 save area address                               */
+*/*              R14 return address                                  */
+*/*              R15 entry point address                             */
+*/*                                                                  */
+*/* Regs Usage:  R6  DCB  address                                    */
+*/*              R7  SVX  address                                    */
+*/*              R8  SVR  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 LGXE address                                    */
+*/*              R13 save area address                               */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+ENDSVR   DS    0H
+         USING IHADCB,R6
+         USING SVX,R7
+         USING SVR,R8
+         USING SVCE,R9
+         USING ZSVT,R11
+         USING LGXE,R12
+         B     12(,R15)
+         DC    CL8'ENDSVR'
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15
+         USING ENDSVR,R10              base
+         LA    R1,SVXLGSSA             subroutine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         ZTRCE LOG=I,LINKAGE=LOCAL     trace
+*
+**       Capture SVC exit CPU
+*
+         USING PSA,0
+         LH    R1,PSACPULA             logical CPU
+         ST    R1,SVRWORD              fullword
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRCPOLA,SVRVAR+4       save it
+*
+         LH    R1,PSACPUPA             physical CPU
+         ST    R1,SVRWORD              fullword
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRCPOPA,SVRVAR+4       save it
+*
+**       Capture access registers
+*
+         ZMACS GEN=CNVX,SVRVAR,SVXOAR0,TR=SVRTRTAB
+         MVC   SVROAR0,SVRVAR          save it
+         ZMACS GEN=CNVX,SVRVAR,SVXOAR1,TR=SVRTRTAB
+         MVC   SVROAR1,SVRVAR          save it
+         ZMACS GEN=CNVX,SVRVAR,SVXOAR14,TR=SVRTRTAB
+         MVC   SVROAR14,SVRVAR         save it
+         ZMACS GEN=CNVX,SVRVAR,SVXOAR15,TR=SVRTRTAB
+         MVC   SVROAR15,SVRVAR         save it
+*
+**       Capture general registers
+*
+         ZMACS GEN=CNVX,SVRVAR,SVXOHR0,TR=SVRTRTAB
+         MVC   SVROHR0,SVRVAR          save it
+         ZMACS GEN=CNVX,SVRVAR,SVXOLR0,TR=SVRTRTAB
+         MVC   SVROLR0,SVRVAR          save it
+*
+         ZMACS GEN=CNVX,SVRVAR,SVXOHR1,TR=SVRTRTAB
+         MVC   SVROHR1,SVRVAR          save it
+         ZMACS GEN=CNVX,SVRVAR,SVXOLR1,TR=SVRTRTAB
+         MVC   SVROLR1,SVRVAR          save it
+*
+         ZMACS GEN=CNVX,SVRVAR,SVXOHR14,TR=SVRTRTAB
+         MVC   SVROHR14,SVRVAR         save it
+         ZMACS GEN=CNVX,SVRVAR,SVXOLR14,TR=SVRTRTAB
+         MVC   SVROLR14,SVRVAR         save it
+*
+         ZMACS GEN=CNVX,SVRVAR,SVXOHR15,TR=SVRTRTAB
+         MVC   SVROHR15,SVRVAR         save it
+         ZMACS GEN=CNVX,SVRVAR,SVXOLR15,TR=SVRTRTAB
+         MVC   SVROLR15,SVRVAR         save it
+         ZTRCE LOG=J,LINKAGE=LOCAL     trace
+*
+**       Validate storage request
+*
+         CLC   =CL7'GETMAIN',SVRMACRO  getmain?
+         BE    ENDS010                 yes
+         CLC   =CL8'FREEMAIN',SVRMACRO freemain?
+         BNE   ENDSEXIT                no, exit
+*
+**       Capture SVC-120 GETMAIN/FREEMAIN
+*
+ENDS010  DS    0H
+         OI    SVXFLG3,SVX@STOR        set indicator
+         CLI   SVXSVCNM,120            SVC-120?
+         BNE   ENDS200                 no
+         LA    R3,SVXILR15             entry low R15
+         USING Z120,R3
+         TM    Z120BYT3,Z120FRE        freemain?
+         BNZ   ENDS040                 yes
+         MVC   SVRMACRO,ZSVTBLKS
+         MVC   SVRMACRO(7),=CL7'GETMAIN'
+*
+         XR    R1,R1
+         IC    R1,Z120BYT1             key
+         ST    R1,SVRWORD
+         TM    Z120BYT0,Z120KEY        key specified?
+         BNZ   ENDS030                 yes
+         IC    R1,SVRPKEY              caller key
+         ST    R1,SVRWORD
+*
+ENDS030  DS    0H
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRSTKEY,SVRVAR+6
+*
+         XR    R1,R1
+         IC    R1,Z120BYT2             subpool
+         STC   R1,SVRSPN               binary subpool
+         ST    R1,SVRWORD
+         ZMACS GEN=CNVD,SVRVAR,SVRWORD,DWORD=SVRDWORD
+         MVC   SVRSTSPN,SVRVAR+5       decimal subpool
+*
+         ZMACS GEN=CNVX,SVRVAR,SVXILR0,TR=SVRTRTAB
+         MVC   SVRSTGLN,SVRVAR
+*
+         ZMACS GEN=CNVX,SVRVAR,SVXOLR1,TR=SVRTRTAB
+         MVC   SVRSTGAD,SVRVAR
+         B     ENDS099
+*
+ENDS040  DS    0H
+         MVC   SVRMACRO,ZSVTBLKS
+         MVC   SVRMACRO(8),=CL8'FREEMAIN'
+*
+         XR    R1,R1
+         IC    R1,Z120BYT1             key
+         ST    R1,SVRWORD
+         TM    Z120BYT0,Z120KEY        key specified?
+         BNZ   ENDS050                 yes
+         IC    R1,SVRPKEY              caller key
+         ST    R1,SVRWORD
+*
+ENDS050  DS    0H
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRSTKEY,SVRVAR+6
+*
+         XR    R1,R1
+         IC    R1,Z120BYT2             subpool
+         STC   R1,SVRSPN               binary subpool
+         ST    R1,SVRWORD
+         ZMACS GEN=CNVD,SVRVAR,SVRWORD,DWORD=SVRDWORD
+         MVC   SVRSTSPN,SVRVAR+5       decimal subpool
+*
+         ZMACS GEN=CNVX,SVRVAR,SVXILR0,TR=SVRTRTAB
+         MVC   SVRSTGLN,SVRVAR         length
+*
+         ZMACS GEN=CNVX,SVRVAR,SVXILR1,TR=SVRTRTAB
+         MVC   SVRSTGAD,SVRVAR         address
+         B     ENDS099
+         DROP  R3
+*
+**       Capture SVC-4 GETMAIN
+*
+ENDS200  DS    0H
+         CLI   SVXSVCNM,4              getmain?
+         BNE   ENDS300                 no
+         LA    R3,SVXILR1              PLIST address
+         USING Z004,R3
+*
+         XR    R1,R1
+         IC    R1,SVRPKEY              caller key
+         ST    R1,SVRWORD
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRSTKEY,SVRVAR+6
+*
+         IC    R1,Z004B9               subpool
+         STC   R1,SVRSPN               binary subpool
+         ST    R1,SVRWORD
+         ZMACS GEN=CNVD,SVRVAR,SVRWORD,DWORD=SVRDWORD
+         MVC   SVRSTSPN,SVRVAR+5       decimal subpool
+*
+         MVC   SVRWORD,Z004B03
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRSTGLN,SVRVAR         length
+*
+         XR    R1,R1
+         ICM   R1,7,Z004B57
+         ST    R1,SVRWORD
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRSTGAD,SVRVAR         address
+*
+         MVC   SVRMACRO,ZSVTBLKS
+         MVC   SVRMACRO(7),=CL7'GETMAIN'
+         B     ENDS099
+         DROP  R3
+*
+**       Capture SVC-5 FREEMAIN
+*
+ENDS300  DS    0H
+         CLI   SVXSVCNM,5              freemain?
+         BNE   ENDS400                 no
+         LA    R3,SVXILR1              PLIST address
+         USING Z005,R3
+*
+         XR    R1,R1
+         IC    R1,SVRPKEY              caller key
+         ST    R1,SVRWORD
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRSTKEY,SVRVAR+6
+*
+         IC    R1,Z005B9               subpool
+         STC   R1,SVRSPN               binary subpool
+         ST    R1,SVRWORD
+         ZMACS GEN=CNVD,SVRVAR,SVRWORD,DWORD=SVRDWORD
+         MVC   SVRSTSPN,SVRVAR+5       decimal subpool
+*
+         MVC   SVRWORD,Z005B03
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRSTGLN,SVRVAR         length
+*
+         MVC   SVRWORD,Z005B47
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRSTGAD,SVRVAR         address
+*
+         MVC   SVRMACRO,ZSVTBLKS
+         MVC   SVRMACRO(8),=CL8'FREEMAIN'
+         B     ENDS099
+         DROP  R3
+*
+**       Capture SVC-10 parameter data
+*
+ENDS400  DS    0H
+         CLI   SVXSVCNM,10             getmain/freemain?
+         BNE   ENDS099                 no, exit
+         LA    R3,SVXILR0              entry low R0
+         USING Z010,R3
+*
+         XR    R1,R1
+         IC    R1,Z010SP               subpool
+         STC   R1,SVRSPN               binary subpool
+         ST    R1,SVRWORD
+         ZMACS GEN=CNVD,SVRVAR,SVRWORD,DWORD=SVRDWORD
+         MVC   SVRSTSPN,SVRVAR+5       decimal subpool
+*
+         LA    R5,SVXCPSW              caller PSW
+         USING PSW,R5
+         XR    R1,R1
+         IC    R1,PSWBYTE1             key
+         SRL   R1,4                    shit out state bits
+         SLL   R1,4                    fix protect key
+         ST    R1,SVRWORD
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRSTKEY,SVRVAR+6
+         DROP  R5
+*
+         ICM   R1,7,Z010LN
+         ST    R1,SVRWORD
+         ZMACS GEN=CNVD,SVRVAR,SVRWORD,DWORD=SVRDWORD
+         MVC   SVRSTGLN,SVRVAR         length
+         DROP  R3
+*
+         MVC   SVRMACRO,ZSVTBLKS
+         L     R1,SVXILR1
+         LTR   R1,R1                   freemain?
+         BP    ENDS420                 yes
+         MVC   SVRWORD,SVXOLR1
+         MVI   SVRWORD,X'00'           zap high byte
+         MVC   SVRMACRO(7),=CL7'GETMAIN'
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRSTGAD,SVRVAR         address
+         B     ENDS099
+*
+ENDS420  DS    0H
+         MVC   SVRWORD,SVXILR1
+         MVI   SVRWORD,X'00'           zap high byte
+         MVC   SVRMACRO(8),=CL8'FREEMAIN'
+         ZMACS GEN=CNVX,SVRVAR,SVRWORD,TR=SVRTRTAB
+         MVC   SVRSTGAD,SVRVAR         address
+         ZTRCE LOG=K,LINKAGE=LOCAL     trace
+*
+ENDS099  DS    0H
+         TM    SVCEFLG2,SVCE@SPN       subpools?
+         BZ    ENDS999                 no, log data
+         XR    R1,R1
+         IC    R1,SVRSPN               subpool
+         SLL   R1,2                    multiply by 4
+         ICM   R3,15,SVCESPNA          SPNTAB init?
+         BZ    ENDS999                 no, log data
+         LA    R3,0(R1,R3)             point to SPNX entry
+         USING SPNX,R3                 SVNX table entry
+         CLI   SPNXACTN,SPN@LOG        log this subpool?
+         BNE   ENDSEXIT                no, exit
+*
+ENDS999  DS    0H
+         OI    SVXFLG3,SVX@LOGM        log GETMAIN/FREEMAIN
+         ZTRCE LOG=L,LINKAGE=LOCAL     trace
+         DROP  R3
+*
+**       Subroutine Exit
+*
+ENDSEXIT DS    0H
+         L     R13,GPR@BWD(,R13)       mainline save area
+         LM    R14,R12,GPR@R14(R13)    restore mainline regs
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+STCKOLST STCKCONV MF=L
+STCK@OLN EQU   *-STCKOLST
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        LOGSVR                                              */
+*/*                                                                  */
+*/* Function:    Log SVR records subroutine                          */
+*/*                                                                  */
+*/* Input Regs:  R6  DCB  address                                    */
+*/*              R7  SVX  address                                    */
+*/*              R8  SVR  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R13 save area address                               */
+*/*              R14 return address                                  */
+*/*              R15 entry point address                             */
+*/*                                                                  */
+*/* Regs Usage:  R6  DCB  address                                    */
+*/*              R7  SVX  address                                    */
+*/*              R8  SVR  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 LGXE address                                    */
+*/*              R13 save area address                               */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+LOGSVR   DS    0H
+         USING IHADCB,R6
+         USING SVX,R7
+         USING SVR,R8
+         USING SVCE,R9
+         USING ZSVT,R11
+         USING LGXE,R12
+         B     12(,R15)
+         DC    CL8'LOGSVR'
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base
+         USING LOGSVR,R10
+         LA    R1,SVXLGSSA             subroutine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+*
+**       Storage subpool check
+*
+         TM    SVXFLG3,SVX@STOR        GETMAIN/FREEMAIN?
+         BZ    LOG0010                 no
+         TM    SVXFLG3,SVX@LOGM        logging required?
+         BZ    LOGEXIT                 no, exit
+*
+**       Log separator line
+*
+LOG0010  DS    0H
+         MVC   LGXELOGR,IDLINE         set record
+         ZLOGS (R6),LGXELOGR           write record
+         L     R1,LGXERECS             record count
+         LA    R1,1(,R1)               add one
+         ST    R1,LGXERECS             update count
+         ZTRCE LOG=M,LINKAGE=LOCAL     trace
+*
+**       Log SVC data line
+*
+         LA    R4,LGXELOGR
+         USING ZSVC,R4
+         MVC   ZSVC2,ZSVTBLKS
+         MVC   ZSVCID,IDSVC            record ID
+         MVC   ZSVCID2,IDSVC2          record ID2
+         MVC   ZSVCNUM,SVRSVCN         SVC number
+         MVC   ZSVCOUNT,SVRCOUNT       SVC issued count
+         MVC   ZSVCTYPE,SVRTYPE        SVC type
+         MVC   ZSVCAPF,SVRAPF          APF-authorization
+         MVC   ZSVCNONP,SVRNONP        non-preemptive status
+         MVC   ZSVCLCK,=CL4' LK='      locks ID
+         MVC   ZSVCLOCK,SVRLOCK        required locks
+         ZLOGS (R6),(R4)               write record
+*
+LOG0015  DS    0H
+         L     R2,SVCELOGC             log count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,SVCELOGC          record logged
+         BNE   LOG0015                 changed: try again
+*
+**       Log SVC macro name
+*
+         LA    R4,LGXELOGR
+         USING ZMAC,R4
+         MVC   ZMAC2,ZSVTBLKS
+         MVC   ZMACID,IDMAC            record ID
+         MVC   ZMACID2,SVRMACRO        record data
+         ZLOGS (R6),(R4)               write record
+*
+**       Log issued SVC sequence number
+*
+         LA    R4,LGXELOGR
+         USING ZSEQ,R4
+         MVC   ZSEQ2,ZSVTBLKS
+         MVC   ZSEQID,IDSEQ            record ID
+         MVC   ZSEQID2,SVRSEQNT        record data
+         ZLOGS (R6),(R4)               write record
+*
+**       Log storage attributes
+*
+         TM    SVXFLG3,SVX@LOGM        GETMAIN/FREEMAIN?
+         BZ    LOG0020                 no
+         LA    R4,LGXELOGR
+         USING ZSTG,R4
+         MVC   ZSTG2,ZSVTBLKS
+         MVC   ZSTGID,IDSTG            record ID
+         MVC   ZSTGID2,IDSTG2          record ID2
+         MVC   ZSTGSP,SVRSTSPN         storage subpool
+         MVC   ZSTGKEY,SVRPKEY         storage key
+         MVC   ZSTGLN,SVRSTGLN         storage length
+         MVC   ZSTGADR,SVRSTGAD        storage address
+         ZLOGS (R6),(R4)               write record
+*
+**       Log Program name
+*
+LOG0020  DS    0H
+         USING ZPGM,R4
+         MVC   ZPGM2,ZSVTBLKS
+         MVC   ZPGMID,IDPGM            record ID
+         MVC   ZPGMID2,SVRMJNM         record data
+         CLI   ZPGMID2,X'00'           PGM name?
+         BNE   LOG0030                 no
+         MVC   ZPGMID2,SVREPNM         record data
+         CLI   ZPGMID2,X'00'           PGM name?
+         BNE   LOG0030                 no
+         MVC   ZPGMID2,=CL8'Unknown'   yes
+*
+LOG0030  DS    0H
+         ZLOGS (R6),(R4)               write record
+*
+**       Log program entry address
+*
+         TM    SVCEFLG2,SVCE@RPT       RPT=D?
+         BZ    LOG0050                 no
+         USING ZEPA,R4
+         MVC   ZEPA2,ZSVTBLKS
+         MVC   ZEPAID,IDEPA            record ID
+         MVC   ZEPAID2,SVRPGMEP        record data
+         CLC   SVRPGMEP,ZSVTZERO       zero?
+         BE    LOG0035                 yes
+         CLC   SVRPGMEP,ZSVTBLKS       blanks?
+         BNE   LOG0045                 yes
+*
+LOG0035  DS    0H
+         MVC   ZEPAID2,SVRLODEP        record data
+         CLC   SVRLODEP,ZSVTZERO       zero?
+         BE    LOG0040                 yes
+         CLC   SVRLODEP,ZSVTBLKS       blanks?
+         BNE   LOG0045                 no
+*
+LOG0040  DS    0H
+         MVC   ZEPAID2,=CL8'Unknown'   yes
+*
+LOG0045  DS    0H
+         ZLOGS (R6),(R4)               write record
+*
+**       Log program offset address
+*
+         USING ZOFF,R4
+         MVC   ZOFF2,ZSVTBLKS
+         MVC   ZOFFID,IDOFF            record ID
+         MVC   ZOFFID2,SVRPGMOF        record data
+         ZLOGS (R6),(R4)               log record
+*
+**       Log unit of work type
+*
+LOG0050  DS    0H
+         CLC   SVRBTYPE,=CL4'SVRB'     SVRB?
+         BNE   LOG0060                 no
+         TM    SVCEFLG2,SVCE@RPT       RPT=D?
+         BZ    LOG0070                 no
+*
+LOG0060  DS    0H
+         USING ZUOW,R4
+         MVC   ZUOW2,ZSVTBLKS
+         MVC   ZUOWID,IDUOW            record ID
+         MVC   ZUOWID2,SVRBTYPE        record data
+         ZLOGS (R6),(R4)               write record
+*
+**       Log Program authorization
+*
+LOG0070  DS    0H
+         TM    SVCEFLG2,SVCE@RPT       RPT=D?
+         BZ    LOG0080                 no
+         USING ZACC,R4
+         MVC   ZACC2,ZSVTBLKS
+         MVC   ZACCID,IDACC            record ID
+         MVC   ZACCID2,SVRAC01         record data
+         ZLOGS (R6),(R4)               write record
+*
+**       Log unit of work state
+*
+LOG0080  DS    0H
+         USING ZSYS,R4
+         MVC   ZSYS2,ZSVTBLKS
+         MVC   ZSYSID,IDSYS            record ID
+         MVC   ZSYSID2,SVRSTATE        record data
+         MVC   ZSYSID3,=CL4'Key='      record data
+         MVC   ZSYSID4,SVRPKEY         record data
+         ZLOGS (R6),(R4)               write record
+         TM    SVCEFLG2,SVCE@RPT       RPT=D?
+         BZ    LOG0099                 no
+*
+**       Log time and date
+*
+         USING ZTME,R4
+         MVC   ZTME2,ZSVTBLKS
+         MVC   ZTMEID,IDTME            record ID
+         MVC   ZTMEID2,SVRTIMED        record data
+         ZLOGS (R6),(R4)               write record
+*
+**       Log SVC issued on CPU
+*
+         USING ZICP,R4
+         MVC   ZICP2,ZSVTBLKS
+         MVC   ZICPID,IDICP            record ID
+         MVC   ZICPID2,SVRCPIPA        record data
+         ZLOGS (R6),(R4)               write record
+*
+**       Log SVC completed on CPU
+*
+         USING ZOCP,R4
+         MVC   ZOCP2,ZSVTBLKS
+         MVC   ZOCPID,IDOCP            record ID
+         MVC   ZOCPID2,SVRCPOPA        record data
+         ZLOGS (R6),(R4)               write record
+*
+**       Log blank data line
+*
+         MVC   LGXELOGR,ZSVTBLKS       blanks
+         ZLOGS (R6),(R4)               write record
+*
+**       Log AR0/R0 entry regs
+*
+         USING ZGRS,R4
+         MVC   ZGRS2,ZSVTBLKS
+         MVC   ZGRID,IDIGR
+         MVC   ZAR,IDAR0               log ID
+         MVC   ZARVAL,SVRIAR0          log AR0
+         MVC   ZGR,IDR0                log ID
+         MVC   ZGRVALH,SVRIHR0         log high R0
+         MVC   ZGRVALL,SVRILR0         log low R0
+         ZLOGS (R6),(R4)               write record
+*
+**       Log AR1/R1 entry regs
+*
+         USING ZGRS,R4
+         MVC   ZGRS2,ZSVTBLKS
+         MVC   ZGRID,ZSVTBLKS
+         MVC   ZAR,IDAR1               log ID
+         MVC   ZARVAL,SVRIAR1          log AR1
+         MVC   ZGR,IDR1                log ID
+         MVC   ZGRVALH,SVRIHR1         log high R1
+         MVC   ZGRVALL,SVRILR1         log low R1
+         ZLOGS (R6),(R4)               write record
+*
+**       Log AR14/R14 entry regs
+*
+         USING ZGRS,R4
+         MVC   ZGRS2,ZSVTBLKS
+         MVC   ZAR,IDAR14              log ID
+         MVC   ZARVAL,SVRIAR14         log AR14    a
+         MVC   ZGR,IDR14               log ID
+         MVC   ZGRVALH,SVRIHR14        log high R14
+         MVC   ZGRVALL,SVRILR14        log low R14
+         ZLOGS (R6),(R4)               write record
+*
+**       Log AR15/R15 entry regs
+*
+         USING ZGRS,R4
+         MVC   ZGRS2,ZSVTBLKS
+         MVC   ZAR,IDAR15              log ID
+         MVC   ZARVAL,SVRIAR15         log AR15
+         MVC   ZGR,IDR15               log ID
+         MVC   ZGRVALH,SVRIHR15        log high R15
+         MVC   ZGRVALL,SVRILR15        log low R15
+         ZLOGS (R6),(R4)               write record
+*
+**       Log blank line
+*
+         MVC   LGXELOGR,ZSVTBLKS       blanks
+         ZLOGS (R6),LGXELOGR           write record
+*
+**       Log AR0/R0 return regs
+*
+         USING ZGRS,R4
+         MVC   ZGRS2,ZSVTBLKS
+         MVC   ZGRID,IDOGR
+         MVC   ZAR,IDAR0               log ID
+         MVC   ZARVAL,SVROAR0          log AR0
+         MVC   ZGR,IDR0                log ID
+         MVC   ZGRVALH,SVROHR0         log high R0
+         MVC   ZGRVALL,SVROLR0         log low R0
+         ZLOGS (R6),(R4)               write record
+*
+**       Log AR1/R1 return regs
+*
+         USING ZGRS,R4
+         MVC   ZGRS2,ZSVTBLKS
+         MVC   ZGRID,ZSVTBLKS
+         MVC   ZAR,IDAR1               log ID
+         MVC   ZARVAL,SVROAR1          log AR1     a
+         MVC   ZGR,IDR1                log ID
+         MVC   ZGRVALH,SVROHR1         log high R1
+         MVC   ZGRVALL,SVROLR1         log low R1
+         ZLOGS (R6),(R4)               write record
+*
+**       Log AR14/R14 return regs
+*
+         USING ZGRS,R4
+         MVC   ZGRS2,ZSVTBLKS
+         MVC   ZAR,IDAR14              log ID
+         MVC   ZARVAL,SVROAR14         log AR14    a
+         MVC   ZGR,IDR14               log ID
+         MVC   ZGRVALH,SVROHR14        log high R14
+         MVC   ZGRVALL,SVROLR14        log low R14
+         ZLOGS (R6),(R4)               write record
+*
+**       Log AR15/R15 return regs
+*
+         USING ZGRS,R4
+         MVC   ZGRS2,ZSVTBLKS
+         MVC   ZAR,IDAR15              log ID
+         MVC   ZARVAL,SVROAR15         log AR15
+         MVC   ZGR,IDR15               log ID
+         MVC   ZGRVALH,SVROHR15        log high R15
+         MVC   ZGRVALL,SVROLR15        log low R15
+         ZLOGS (R6),(R4)               write record
+*
+**       Log blank line
+*
+LOG0099  DS    0H
+         MVC   LGXELOGR,ZSVTBLKS       blanks
+         ZLOGS (R6),LGXELOGR           write record
+         ZTRCE LOG=N,LINKAGE=LOCAL     trace
+*
+**       Subroutine Exit
+*
+LOGEXIT  DS    0H
+         L     R13,GPR@BWD(,R13)       mainline save area
+         LM    R14,R12,GPR@R14(R13)    restore mainline regs
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+LOGDATA  DS    0C
+IDSVC    DC    CL31' SVC .........................'
+IDMAC    DC    CL31' MACRO .......................'
+IDSEQ    DC    CL31'  Sequence ...................'
+IDSTG    DC    CL31'  Storage attributes .........'
+IDPGM    DC    CL31'  Program name ...............'
+IDEPA    DC    CL31'  Entry address ..............'
+IDOFF    DC    CL31'   Issued at address .........'
+IDUOW    DC    CL31'   Unit of work ..............'
+IDACC    DC    CL31'   Authorization .............'
+IDSYS    DC    CL31'   System state and key ......'
+IDTME    DC    CL31'   Time and date .............'
+IDICP    DC    CL31'   Issued on CPU .............'
+IDOCP    DC    CL31'   Completed on CPU ..........'
+*
+IDIGR    DC    CL31'   SVC entry registers........'
+IDIGR@LN EQU   *-IDIGR
+*
+IDOGR    DC    CL31'   SVC return registers.......'
+IDOGR@LN EQU   *-IDOGR
+*
+IDR0     DC    CL05'R0:'
+IDR1     DC    CL05'R1:'
+IDR14    DC    CL05'R14:'
+IDR15    DC    CL05'R15:'
+*
+IDAR0    DC    CL05'AR0:'
+IDAR1    DC    CL05'AR1:'
+IDAR14   DC    CL05'AR14:'
+IDAR15   DC    CL05'AR15:'
+*
+IDLINE   DS    0CL80
+         DC    CL1' '
+         DC    29C'-'
+         DC    CL1' '
+         DC    39C'-'
+         DC    CL10' '
+IDLINESZ EQU   *-IDLINE
+*
+IDSVC2   DC    CL42'??? IC=?????? T=? APF=??? NP=? LK=????????'
+*
+IDSTG2   DC    CL42'ADDR=???????? LEN=???????? SP=??? KEY=?'
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        SMFLOG                                              */
+*/*                                                                  */
+*/* Function:    Write SMF record subroutine                         */
+*/*                                                                  */
+*/* Input Regs:  R6  DCB  address                                    */
+*/*              R7  SVX  address                                    */
+*/*              R8  SVR  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R13 save area address                               */
+*/*              R14 return address                                  */
+*/*              R15 entry point address                             */
+*/*                                                                  */
+*/* Regs Usage:  R5  SMFT address                                    */
+*/*              R6  SMFE address                                    */
+*/*              R7  SVX  address                                    */
+*/*              R8  SVR  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 LGXE address                                    */
+*/*              R13 save area address                               */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+SMFLOG   DS    0H
+         USING SVX,R7
+         USING SVR,R8
+         USING SVCE,R9
+         USING ZSVT,R11
+         USING LGXE,R12
+         B     12(,R15)
+         DC    CL8'SMFLOG'
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base
+         USING SMFLOG,R10
+         LA    R1,SVXLGSSA             subroutine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+*
+**       Validity check SMFT table
+*
+         L     R5,SVCESMFT             SMFTAB address
+         USING SMFT,R5
+         CLC   SMFTID,=CL4'SMFT'       valid?
+         BE    SMF0010                 yes
+         ZTRCE LOG=O,LINKAGE=LOCAL     trace
+         B     SMFEXIT                 exit
+*
+**       Build audit data subsection
+*
+SMF0010  DS    0H
+         ICM   R6,15,SMFTFREE          free SMFE slot?
+         BNZ   SMF0020                 yes
+         ZTRCE LOG=P,LINKAGE=LOCAL     trace
+         B     SMFEXIT                 exit
+*
+SMF0020  DS    0H
+         USING SMFE,R6
+         XC    SMFE(SMFE@SZE),SMFE     clear it
+         MVC   SMFEPGM,SVRPGMEP        program name
+         MVC   SMFESVCN,SVRMACRO       SVC macro name
+         MVC   SMFESEQN,SVRSEQNT       SVC sequence number
+         MVC   SMFTSTEP,SVRSTEPN       step name
+*
+         MVC   SMFEADDR,SVREPA         program load point address
+         MVC   SMFELOAD,SVRLODPT       program entry address
+         MVC   SMFEOSET,SVROFSET       program offset where SVC issued
+         MVC   SMFEITME,SVRTIME        time SVC was issued
+         MVC   SMFEIDTE,SVRDATE        date SVC was issued
+*
+         MVC   SMFEKEY,SVRPKEY         storage protect key
+         MVC   SMFESPN,SVRSPN          storage subpool
+         MVC   SMFESVC,SVXSVCNM        SVC number {00-FF}
+         MVC   SMFESVCT,SVRTYPE        SVC type {1|2|3|4|6}
+         MVC   SMFEAC,SVRAC01+3        Authorization code(AC) {0|1}
+         MVC   SMFENONP,SVRNONP        non-preemptive {Y|N}
+         MVC   SMFEMODE,SVRSTATE       PSW state {P|S}
+*
+         MVC   SMFEILCP,SVRCPILA       SVC issued on logical CPU
+         MVC   SMFEIPCP,SVRCPIPA       SVC issued on physical CPU
+         MVC   SMFEOLCP,SVRCPOLA       SVC completed on logical CPU
+         MVC   SMFEOPCP,SVRCPOPA       SVC completed on physical CPU
+*
+         MVC   SMFEIAR0,SVXIAR0        SVC entry AR0
+         MVC   SMFEIAR1,SVXIAR1        SVC ettry AR1
+         MVC   SMFEIARE,SVXIAR14       SVC entry AR14
+         MVC   SMFEIARF,SVXIAR15       SVC entry AR15
+*
+         MVC   SMFEIHR0,SVXIHR0        SVC entry high R0
+         MVC   SMFEILR0,SVXILR0        SVC entry low  R0
+         MVC   SMFEIHR1,SVXIHR1        SVC entry high R1
+         MVC   SMFEILR1,SVXILR1        SVC entry low  R1
+         MVC   SMFEIHRE,SVXIHR14       SVC entry high R14
+         MVC   SMFEILRE,SVXILR14       SVC entry low  R14
+         MVC   SMFEIHRF,SVXIHR15       SVC entry high R15
+         MVC   SMFEILRF,SVXILR15       SVC entry low  R15
+*
+         MVC   SMFEOAR0,SVXOAR0        SVC return AR0
+         MVC   SMFEOAR1,SVXOAR1        SVC return AR1
+         MVC   SMFEOARE,SVXOAR14       SVC return AR14
+         MVC   SMFEOARF,SVXOAR15       SVC return AR15
+*              *
+         MVC   SMFEOHR0,SVXOHR0        SVC return high R0
+         MVC   SMFEOLR0,SVXOLR0        SVC return low  R0
+         MVC   SMFEOHR1,SVXOHR1        SVC return high R1
+         MVC   SMFEOLR1,SVXOLR1        SVC return low  R1
+         MVC   SMFEOHRE,SVXOHR14       SVC return high R14
+         MVC   SMFEOLRE,SVXOLR14       SVC return low  R14
+         MVC   SMFEOHRF,SVXOHR15       SVC return high R15
+         MVC   SMFEOLRF,SVXOLR15       SVC return low  R15
+*
+**       Update record length
+*
+         LH    R3,SMFTLEN              current record length
+         AH    R3,=AL2(SMFE@SZE)       add SMFE record length
+         STH   R3,SMFTLEN              update record length
+*
+**       Update inuse record count
+*
+         L     R3,SMFTSUSE             SMFE count
+         LA    R3,1(,R3)               add one
+         ST    R3,SMFTSUSE             update count
+*
+**       Set next record slot
+*
+         LA    R6,SMFE@SZE(,R6)        next SMFE slot
+         ST    R6,SMFTFREE             set free SMFE slot
+         CLC   SVCETERM,=CL4'TERM'     terminate logging?          @02A
+         BE    SMF0030                 yes                         @02A
+         C     R6,SMFTLAST             last SMFE slot?
+         BL    SMFEXIT                 no
+*
+**       Write SMF record
+*
+SMF0030  DS    0H
+         MVC   SMFTDATE,SVRDATE        date stamp
+         MVC   SMFTTIME,SVRTIME        time stamp
+         MVC   SMFTYPE,ZSVTSMFN        refrsh record number
+         XC    SMFTFREE,SMFTFREE       zero free slot
+         SMFWTM SMFTREC                write SMF record
+         ST    R15,ZSVTXRC             RC debug (volatile)
+         ST    R15,SMFTIFRC            RC debug (volatile)
+         LTR   R15,R15                 successful?
+         BZ    SMF0040                 yes
+         ZTRCE LOG=Q,LINKAGE=LOCAL     trace
+*
+**       Update SMF record count
+*
+SMF0040  DS    0H
+         L     R1,ZSVTSMFC             record count
+         LA    R1,1(,R1)               add one
+         ST    R1,ZSVTSMFC             update count
+         ZTRCE LOG=R,LINKAGE=LOCAL     trace
+*
+**       Reset SMFT table pointers
+*
+         LA    R6,SMFT@SZE(,R5)        1st SMFE slot
+         ST    R6,SMFTFREE             free record slot
+         XC    SMFTSEG,SMFTSEG         zero segment descriptor
+         XC    SMFTSUSE,SMFTSUSE       zero inuse count
+         MVC   SMFTLEN,=AL4(SMFT@HDR)  set data section length
+         ZTRCE LOG=S,LINKAGE=LOCAL     trace
+*
+**       Subroutine Exit
+*
+SMFEXIT  DS    0H
+         L     R13,GPR@BWD(,R13)       mainline save area
+         LM    R14,R12,GPR@R14(R13)    restore mainline regs
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0C
+SMFRCD   DC    X'002F00000280'         SMF record header
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*---------------------------------------------------------------------*
+*        TIME & DATE map                                              *
+*--------+---------+---------+---------+---------+---------+---------+*
+TMAP     DSECT
+TIMESTR  DS    0CL38
+TIMEHH   DS    CL2                      hours
+         DS    CL1                      :
+TIMEMM   DS    CL2                      minutes
+         DS    CL1                      :
+TIMESS   DS    CL2                      seconds
+         DS    CL1                      :
+TIMETH   DS    CL2                      hundreds
+         DS    CL1
+*
+DATEMM   DS    CL2                      month
+         DS    CL1                      /
+DATEDD   DS    CL2                      day
+         DS    CL1                      /
+DATEYY   DS    CL4                      year
+         DS    CL16                     filler
+TIME@DTE EQU   *-TMAP
+*---------------------------------------------------------------------*
+*        JOB header map                                               *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZJOB     DSECT ,
+ZJOBREC  DS    0CL80
+         DC    CL01' '
+ZJOBTYPE DS    CL09'JOB:'
+ZJOBNAME DS    CL08' '
+         DS    CL62' '
+ZJOB@SZE EQU   *-ZJOB
+*---------------------------------------------------------------------*
+*        STEP header map                                              *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZSTEP    DSECT ,
+ZSTPREC  DS    0CL80
+         DC    CL01' '
+ZSTPID   DS    CL09'STEP:'
+ZSTPNAME DS    CL08' '
+         DS    CL62' '
+ZSTP@SZE EQU   *-ZSTEP
+*---------------------------------------------------------------------*
+*        SYSTEM header map                                            *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZHD1     DSECT ,
+ZHD1REC  DS    0CL80
+         DC    CL01' '
+ZHD1ID   DS    CL09'SYSTEM:'
+ZHD1SYS  DS    CL08'CBT'
+         DS    CL62' '
+ZHD1@SZE EQU   *-ZHD1
+*---------------------------------------------------------------------*
+*        AUDIT header map                                             *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZHD2     DSECT ,
+ZHD2REC  DS    0CL80
+         DC    CL01' '
+ZHD2ID   DC    CL08'MONITOR:'
+         DC    CL07' SUBDD='
+ZHD2SDD  DC    CL08' '
+         DC    CL07' LOGDD='
+ZHD2LOG  DC    CL08' '
+         DC    CL05' RPT='
+ZHD2LRPT DC    CL01' '
+         DC    CL05' SMF='
+ZHD2LSMF DC    CL01' '
+         DC    CL05' RUN='
+ZHD2LRUN DC    CL01' '
+         DC    CL23' '
+ZHD2@SZE EQU   *-ZHD2
+*---------------------------------------------------------------------*
+*        Subpools header map                                          *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZHD3     DSECT ,
+ZHD3REC  DS    0CL80
+         DC    CL01' '
+ZHD3ID   DC    CL09'MONITOR:'
+ZHD3SPID DC    CL60' '
+         DC    CL10' '
+ZHD3@SZE EQU   *-ZHD3
+*---------------------------------------------------------------------*
+*        SVCs header map                                              *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZHD4     DSECT ,
+ZHD4REC  DS    0CL80
+         DC    CL01' '
+ZHD4ID   DC    CL09'MONITOR:'
+ZHD4SVCI DC    CL60' '
+         DC    CL10' '
+ZHD4@SZE EQU   *-ZHD4
+*---------------------------------------------------------------------*
+*        AUDIT header map                                             *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZHD5     DSECT ,
+ZHD5REC  DS    0CL80
+         DC    CL01' '
+ZHD5ID   DC    CL08'OPTIONS:'
+         DC    CL05' SVC='
+ZHD5SVCD DC    CL03' '
+         DC    CL05' SMF='
+ZHD5SMFD DC    CL03' '
+         DC    CL55' '
+ZHD5@SZE EQU   *-ZHD5
+*---------------------------------------------------------------------*
+*        SVC data map                                                 *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZSVC     DSECT ,
+ZSVC2    DS    0CL80
+ZSVCID   DS    CL31'SVC..........................'
+ZSVCID2  DS    0CL42
+ZSVCNUM  DS    CL3'???'
+         DS    CL4' IC='
+ZSVCOUNT DS    CL6' '
+         DS    CL3' T='
+ZSVCTYPE DS    CL1'?'
+         DS    CL5' APF='
+ZSVCAPF  DS    CL3'???'
+         DS    CL4' NP='
+ZSVCNONP DS    CL1'?'
+ZSVCLCK  DS    CL4' LK='
+ZSVCLOCK DS    CL8'????????'
+         DS    CL7' '
+ZSVC@SZE EQU   *-ZSVCID
+*---------------------------------------------------------------------*
+*        MACRO name map                                               *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZMAC     DSECT ,
+ZMAC2    DS    0CL80
+ZMACID   DS    CL31'MACRO........................'
+ZMACID2  DS    CL26' '
+         DS    CL23' '
+ZMAC@SZE EQU   *-ZMAC
+*---------------------------------------------------------------------*
+*        Sequence map                                                 *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZSEQ     DSECT ,
+ZSEQ2    DS    0CL80
+ZSEQID   DS    CL31'Sequence ....................'
+ZSEQID2  DS    CL08' '
+         DS    CL41' '
+ZSEQ@SZE EQU   *-ZSEQ
+*---------------------------------------------------------------------*
+*        Storage attributes map                                       *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZSTG     DSECT ,
+ZSTG2    DS    0CL80
+ZSTGID   DS    CL31'   Storage attrubutes .......'
+ZSTGID2  DS    0CL43
+         DS    CL05'ADDR='
+ZSTGADR  DS    CL08'????????'
+         DS    CL05' LEN='
+ZSTGLN   DS    CL08'????????'
+         DS    CL04' SP='
+ZSTGSP   DS    CL03'???'
+         DS    CL05' KEY='
+ZSTGKEY  DS    CL01'?'
+         DS    CL10' '
+ZSTG@SZE EQU   *-ZSTG
+*---------------------------------------------------------------------*
+*        Program name data map                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZPGM     DSECT ,
+ZPGM2    DS    0CL80
+ZPGMID   DS    CL31'   Program name..............'
+ZPGMID2  DS    CL08' '
+         DS    CL41' '
+ZPGM@SZE EQU   *-ZPGM
+*---------------------------------------------------------------------*
+*        Program entry data map                                       *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZEPA     DSECT ,
+ZEPA2    DS    0CL80
+ZEPAID   DS    CL31'     Entry address............'
+ZEPAID2  DS    CL08' '
+         DS    CL41' '
+ZEPA@SZE EQU   *-ZEPA
+*---------------------------------------------------------------------*
+*        Program offset data map                                      *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZOFF     DSECT ,
+ZOFF2    DS    0CL80
+ZOFFID   DS    CL31'     Offset address...........'
+ZOFFID2  DS    CL08' '
+         DS    CL41' '
+ZOFF@SZE EQU   *-ZOFF
+*---------------------------------------------------------------------*
+*        Program Authorization map                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZACC     DSECT ,
+ZACC2    DS    0CL80
+ZACCID   DS    CL31'     Authorization............'
+ZACCID2  DS    CL05' '
+         DS    CL44' '
+ZACC@SZE EQU   *-ZACC
+*---------------------------------------------------------------------*
+*        Unit of work map                                             *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZUOW     DSECT ,
+ZUOW2    DS    0CL80
+ZUOWID   DS    CL31'     Workunit.................'
+ZUOWID2  DS    CL04' '
+         DS    CL45' '
+ZUOW@SZE EQU   *-ZUOW
+*---------------------------------------------------------------------*
+*        Unit of work state map                                       *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZSYS     DSECT ,
+ZSYS2    DS    0CL80
+ZSYSID   DS    CL31'     System state.............'
+ZSYSID2  DS    CL12' '
+ZSYSID3  DS    CL04' '
+ZSYSID4  DC    CL01' '
+         DS    CL32' '
+ZSYS@SZE EQU   *-ZSYS
+*---------------------------------------------------------------------*
+*        Time and date map                                            *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZTME     DSECT ,
+ZTME2    DS    0CL80
+ZTMEID   DS    CL31'   Time and Date..............'
+ZTMEID2  DS    CL38' '
+         DS    CL11' '
+ZTME@SZE EQU   *-ZTME
+*---------------------------------------------------------------------*
+*        SVC issued CPU map                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZICP     DSECT ,
+ZICP2    DS    0CL80
+ZICPID   DS    CL31'   Issued on CPU..............'
+ZICPID2  DS    CL04' '
+         DS    CL45' '
+ZICP@SZE EQU   *-ZICP
+*---------------------------------------------------------------------*
+*        SVC comple CPU map                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZOCP     DSECT ,
+ZOCP2    DS    0CL80
+ZOCPID   DS    CL31'   Completed on CPU...........'
+ZOCPID2  DS    CL04' '
+         DS    CL45' '
+ZOCP@SZE EQU   *-ZOCP
+*---------------------------------------------------------------------*
+*        SVC entry regs map                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZGRS     DSECT ,
+ZGRS2    DS    0CL80
+ZGRID    DS    CL31'   SVC entry registers........'
+ZAR      DS    CL5'AR15:'
+         DS    CL1' '
+ZARVAL   DS    CL8'00000000'
+         DS    CL2' '
+ZGR      DS    CL5'GR15:'
+ZGRVALH  DS    CL8'00000000'
+         DS    CL1' '
+ZGRVALL  DS    CL8'00000000'
+         DS    CL11' '
+ZGRS@SZE EQU   *-ZGRS
+*---------------------------------------------------------------------*
+*        SVC-4 GETMAIN map                                            )
+*--------+---------+---------+---------+---------+---------+---------+*
+Z004     DSECT ,
+Z004PLST DS    0CL10   bytes PLIST pointed to by R1
+*
+Z004B03  DS    AL4     (0-3) a. Single area request: length requested
+*
+*                            b. Variable request: address of a double
+*                               word containing the minimum maximum
+*                               length requested. Format is:
+*                               byte 0   - zero
+*                               byte 1-3 - minimum length
+*                               byte 4   - zero
+*                               byte 5-7 - Maximum length
+*
+Z004B4   DS    AL1       (4)    zero
+*
+Z004B57  DS    AL3     (5-7) a. Single area request: address of a word
+*                               GETMAIN initializes with the address of
+*                               the area acquired.
+*
+*                            b. Variable area request: address of a
+*                               doubleword GETMAIN initializes with the
+*                               address of the area acquired and the
+*                               actual length allocated.
+*
+*                            c. List Request: address of a list of
+*                               areas that GETMAIN initializes with the
+*                               addresses of the areas allocated for
+*                               each requested length in the length
+*                               list.
+*
+Z004B8   DS    AL1       (8)    Flag byte
+Z004F10  EQU   X'10'            request for storage on page boundary
+Z004F00  EQU   X'00'            unconditional single area request
+Z004F20  EQU   X'20'            conditional single area request
+Z004F80  EQU   X'80'            unconditional list request
+Z004FA0  EQU   X'A0'            conditional list request
+Z004FC0  EQU   X'C0'            unconditional variable request
+Z004FE0  EQU   X'E0'            conditional variable request
+*
+Z004B9   DS    AL1       (9)    subpool identification
+*
+Z004@SZE EQU   *-Z004           PLIST length
+*---------------------------------------------------------------------*
+*        SVC-5 FREEMAIN map                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+Z005     DSECT ,
+Z005PLST DS    0CL10   bytes PLIST pointed to by R1
+*
+Z005B03  DS    AL4     (0-3) a. Single area request: length to freed
+*
+*                            b. List area request: address of list of
+*                               FREEMAIN length request (1 word per
+*                               requeste); Last word contains X'80'
+*                               in byte 0.
+*
+*                            c. Variable Request: zero
+*
+Z005B47  DS    AL4      4-7) a. Single area request. address of a word
+*                               containing the address of the area to
+*                               be freed.
+*
+*                            b. List area request: address of list of
+*                               addresses of areas to be freed.
+*
+*                            c. Variable request:ddress of a doubleword
+*                               containing the address to be freed in
+*                               the first word and the length to be
+*                               freed in the second word.
+*
+Z005B8   DS    AL1       (8)    Flag byte
+Z005F00  EQU   X'00'            unconditional single area request
+Z005F20  EQU   X'20'            conditional single area request
+Z005F80  EQU   X'80'            unconditional list area request
+Z005FA0  EQU   X'A0'            conditional list area request
+Z005FC0  EQU   X'C0'            unconditional variable area reqest
+Z005FE0  EQU   X'E0'            conditional variable request
+*
+Z005B9   DS    AL1       (9)    subpool identification
+*
+Z005@SZE EQU   *-Z005           PLIST length
+*---------------------------------------------------------------------*
+*        SVC-10 GETMAIN/FREEMAIN map                                  )
+*--------+---------+---------+---------+---------+---------+---------+*
+Z010     DSECT ,
+Z010GR0  DS    0F
+Z010SP   DS    AL1              subpool number
+Z010LN   DS    AL3              storage length
+*
+Z010GR1  DS    F                storage address
+*                               a. positive: GETMAIN address
+*                               b. negative: FREEMAIN address
+*                               c. zero: subpool freemain
+*
+Z010@SZE EQU   *-Z010           length
+*---------------------------------------------------------------------*
+*        SVC-120 GEMAIN/FREEMAIN map                                  *
+*--------+---------+---------+---------+---------+---------+---------+*
+Z120     DSECT ,
+Z120R15  DS    0F
+Z120BYT0 DS    XL1                     byte-0
+Z120R00  EQU   X'80'                   -reserved
+Z120KEY  EQU   X'40'                   key was specified
+Z120ARF  EQU   X'20'                   AR15 is in use
+Z120L64  EQU   X'10'                   LOC=(nnn,64) specified
+Z120CHK  EQU   X'08'                   CHECKZERO specified
+Z120TCB  EQU   X'04'                   TCB address specified
+Z120OHM  EQU   X'00'                   OWNER=HOME specified
+Z120OPR  EQU   X'01'                   OWNER=PRIMARY specified
+Z120OSE  EQU   X'02'                   OWNER=SECONDARY specified
+Z120OSY  EQU   X'03'                   OWNER=SYSTEM specified
+*
+Z120BYT1 DS    XL1                     byte-1 storage key
+*
+Z120BYT2 DS    XL1                     byte-2 storage subpool
+*
+Z120BYT3 DS    XL1                     byte-3 storage request
+Z120UNC  EQU   X'02'                   Request is unconditional
+Z120FRE  EQU   X'01'                   request is a FREEMAIN
+Z120@SZE EQU   *-Z120                  length
+*---------------------------------------------------------------------*
+*        Audit Server Data Areas                                      *
+*--------+---------+---------+---------+---------+---------+---------+*
+         PRINT GEN
+         ZSVT  ,
+         ZRWA  ,
+         ZGEQU ,
+         ZTABS GEN=SVMACRO
+         ZTABS GEN=SVCTBLE,DSECT=YES
+         ZTABS GEN=SVNTBLE,DSECT=YES
+         ZTABS GEN=SPNTBLE,DSECT=YES
+*---------------------------------------------------------------------*
+*        System Data Areas                                            *
+*--------+---------+---------+---------+---------+---------+---------+*
+         PRINT GEN
+         IHAPSA ,
+         IHAASCB ,
+         IKJTCB ,
+         IKJRB DSECT=YES
+         IHACDE ,
+         IHASVC ,
+         IHAPSW ,
+         CVT   DSECT=YES
+         IEZJSCB ,
+         IEEBASEA ,
+TIOT     DSECT ,
+         IEFTIOT1 ,
+         DCBD  DSORG=PS,DEVD=DA
+         IEZBITS ,
+         IFASMFH ,
+         END

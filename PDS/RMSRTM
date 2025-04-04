@@ -1,0 +1,271 @@
+RMSRTM   CSECT
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        RMSRTM                                              */
+*/*                                                                  */
+*/* Function:    TCB-mode Recovery Termination Manager               */
+*/*                                                                  */
+*/* Description: Performs recovery functions on behalf of ZRMS       */
+*/*              subsystem service routines.                         */
+*/*                                                                  */
+*/* Input Regs:  When the SDWA is supplied the contents of the       */
+*/*              registers on entry are as follows:                  */
+*/*                                                                  */
+*/*              R0     Input parameter                              */
+*/*              R1     SDWA address                                 */
+*/*              R2-R12 Unpredictable                                */
+*/*              R13    Savearea address                             */
+*/*              R14    Return Address                               */
+*/*              R15    Entry address                                */
+*/*                                                                  */
+*/*              When the SDWA is NOT supplied, the contents of      */
+*/*              the registers on entry are as follows:              */
+*/*                                                                  */
+*/*              R0     12 (decimal)                                 */
+*/*              R1     ABEND completion code                        */
+*/*              R2     Address of parmlist or zero                  */
+*/*              R3-R13 Unpredictable                                */
+*/*              R14    Return address                               */
+*/*              R15    Entry address                                */
+*/*                                                                  */
+*/* Regs Usage:  R8  ZRWA address                                    */
+*/*              R9  SDWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZSVT/READONLY ZSVT                              */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/* Attributes:  TCB mode                                            */
+*/*              Reentrant                                           */
+*/*              Caller key                                          */
+*/*              Caller state                                        */
+*/*              Page-fixed                                          */
+*/*              Write-protected                                     */
+*/*              Dynamic-LPA resident                                */
+*/*                                                                  */
+*/* Copyright:   Ben Marino. 2021 - 2023 (unpublished)               */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @01 | V1R1 | 09242022 | Ben Marino  | Initial version               *
+* @02 | V1R1 | 04032023 | Ben Marino  | Serviceability enhancements   *
+*     |      |          |             |                               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+RMSRTM   AMODE 31
+RMSRTM   RMODE ANY
+         COPY  ZGBLS
+         USING RMSRTM,R15              entry
+         B     RTM0000
+         ZMACS GEN=MID,DSECT=NO        module ID
+*
+RTM0000  DS    0H
+         CL    R0,NOSDWA               SDWA?
+         BNE   RTM0010                 yes
+         DROP  R15
+         LA    R15,0                   percolate
+         BR    R14                     return to RTM
+*
+RTM0010  DS    0H
+         STM   R14,R12,GPR@R14(R13)    save RTM regs
+         LR    R10,R15                 copy base
+         USING RMSRTM,R10
+         LR    R9,R1                   SDWA
+         USING SDWA,R9
+         L     R8,SDWAPARM             ZRWA
+         USING ZRWA,R8
+         L     R11,ZRWAZSVT            ZSVT
+         USING ZSVT,R11
+         LA    R1,ZRWASAVE             savearea
+         ST    R13,GPR@BWD(,R1)
+         LR    R13,R1
+*
+**       Capture diagnostic data
+*
+         TM    SDWAERRD,SDWACLUP       clean up only?
+         BNZ   RTMPERC                 yes
+         TM    SDWAERRC,SDWAPERC       percolated ABEND
+         BNZ   RTMPERC                 yes
+         TM    ZRWAFLG1,ZRWA@PER       recursive ABEND?
+         BNZ   RTMPERC                 yes
+         OI    ZRWAFLG1,ZRWA@PER       set recursion indicator
+         XC    ZRWAWORK,ZRWAWORK       clear work flags
+         MVC   ZRWASUBN,MIDSUB         server name
+         MVC   ZRWAAPSW,SDWAEC2        copy ABEND PSW
+*
+         XC    ZRWASFLG,ZRWASFLG       zap flags                   @02C
+         MVC   ZRWASABN,SDWACMPC       copy ABEND code             @02C
+         L     R3,ZRWABEND             ABEND code
+         SRL   R3,12                   shift it
+         LTR   R3,R3                   user ABEND code?
+         BZ    RTM0020                 yes
+         ST    R3,ZRWABEND             set system ABEND code
+         OI    ZRWAWORK,ZRWA@SYS       no
+*
+RTM0020  DS    0H
+         MVC   ZRWATEA,SDWATRN2        copy translation address
+         MVC   ZRWAILC,SDWAILC2        copy instruction length code
+         MVC   ZRWAIC,SDWAICD2         copy interrupt code
+         MVC   ZRWARECR,RMSRTMID       copy recovery routine name
+*
+**       Init ABEND WTO message
+*
+         MVC   ZRWAWTO(ZRMS99EL),ZRMS99E
+         MVC   ZRWAWSID,ZRWASUBN       show server
+         MVC   ZRWAWMOD,ZRWALMOD       show module
+         TM    ZRWAWORK,ZRWA@SYS       system ABEND code?          @02A
+         BZ    RTM0030                 no                          @02A
+         ZMACS GEN=CNVX,ZRWACONA,ZRWABEND,TR=TRTABLE
+         MVI   ZRWAWTYP,C'S'           system type
+         MVC   ZRWAWCOD(3),ZRWACONA+5  ABEND code
+         MVI   ZRWAWCOD+3,BLANK        trailing blank
+         B     RTM0040
+*
+RTM0030  DS    0H
+         ZMACS GEN=CNVD,DWORD=ZRWADWRD,ZRWACONA,ZRWABEND
+         MVI   ZRWAWTYP,C'U'           user type
+         MVC   ZRWAWCOD,ZRWACONA+4     user ABEND code
+*
+RTM0040  DS    0H
+         ZMACS GEN=CNVX,ZRWACONR,ZRWARSN,TR=TRTABLE
+         MVC   ZRWAWRSN,ZRWACONR       reason code
+*
+**       Issue ABEND WTO message
+*
+         TM    ZRWAFLG1,ZRWA@NWT       WTO=NO?
+         BNZ   RTM0050                 yes
+         WTO   MF=(E,ZRWAWTO)          issue ABEND WTO
+*
+**       Init SVC dump data
+*
+RTM0050  DS    0H
+         LTR   R11,R11                 ZSVT?
+         BZ    RTM0060                 no
+         TM    ZSVTFLG2,ZSVT@DMP       DMP=YES option?
+         BZ    RTMRTRY                 no                          @02C
+*
+RTM0060  DS    0H
+         TM    ZRWAFLG1,ZRWA@NDP       SDUMP=NO?
+         BNZ   RTMRTRY                 yes                         @02C
+         MVC   ZRWADUMP(SDUMPL),SDUMP
+         MVC   ZRWADSUB,ZRWASUBN       show server
+         MVC   ZRWADMOD,ZRWALMOD       show module name
+         TM    ZRWAWORK,ZRWA@SYS       system ABEND code?          @02A
+         BZ    RTM0070                 no                          @02A
+         MVI   ZRWADTYP,C'S'           system type
+         MVC   ZRWADCOD(3),ZRWACONA+5  ABEND code
+         MVI   ZRWADCOD+3,BLANK        trailing blank
+         MVC   ZRWADRSN,ZRWACONR       reason code
+         B     RTM0080
+*
+RTM0070  DS    0H
+         MVI   ZRWADTYP,C'U'           user type
+         MVC   ZRWADCOD,ZRWACONA+4     user ABEND code
+         MVC   ZRWADRSN,ZRWACONR       reason code
+*
+**       Take SVC dump
+*
+RTM0080  DS    0H
+         LA    R1,ZRWADUSR             show,
+         ST    R1,ZRWADATA             dump title
+         IPK   ,                       insert key
+         SPKA  0(0)                    set supervisor key
+         SDUMP MF=(E,ZRWADUMP)         dump
+         SPKA  0(2)                    restore key
+         ST    R15,ZRWASDRC            save SDUMP RC
+*
+**       Retry
+*
+RTMRTRY  DS    0H
+         ICM   R3,15,ZRWARTRY          retry address init?
+         BZ    RTMPERC                 no
+         MVC   SDWASRSV,ZRWAGPRS       set retry regs
+         MVC   SDWACSCT,ZRWASECT       routine name
+         TM    ZRWAFLG1,ZRWA@LOG       LOGREC=YES?
+         BZ    RTRY000                 no
+         SETRP RECORD=YES,WKAREA=(9)   yes
+*
+RTRY000  DS    0H
+         SETRP RC=4,                   retry                           +
+               WKAREA=(9),             SDWA address                    +
+               RETADDR=(3),            retry address                   +
+               RETREGS=YES,            retry regs                      +
+               FRESDWA=YES,            free SDWA                       +
+               RECPARM=ZRWARECP        recovery data
+         B     RTMEXIT                 exit
+*
+**       Percolate
+*
+RTMPERC  DS    0H
+         TM    ZRWAFLG1,ZRWA@LOG       LOGREC=YES?
+         BZ    PERC000                 no
+         SETRP RECORD=YES,WKAREA=(9)   yes
+*
+PERC000  DS    0H
+         SETRP RC=0,WKAREA=(9)         percolate ABEND
+*
+RTMEXIT  DS    0H
+         L     R13,GPR@BWD(,R13)       RTM savearea
+         LM    R14,R12,GPR@R14(R13)    restore RTM regs
+         BR    R14                     return to RTM
+*---------------------------------------------------------------------*
+*        Recovery data                                                *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+NOSDWA   DC    AL4(12)                 SDWA not supplied
+TRTABLE  DC    CL16'0123456789ABCDEF'  translate table
+RMSRTMID DC    CL8'RMSRTM'             RMSRTM ID
+*---------------------------------------------------------------------*
+*        WTO Error Message                                            *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+ZRMS99E  WTO   'ZRMS99E ZRMS SUBSYS ERROR; nnnnnnn ABEND=?0000 RSN=0000+
+               0000',ROUTCDE=(1,11),DESC=(4),MF=L
+ZRMS99EL EQU   *-ZRMS99E
+ZRMS99MX DS    0XL(70-ZRMS99EL+1)      ZRWA map restriction
+*---------------------------------------------------------------------*
+*        SDUMP Title                                                  *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+SDUMP    SDUMP HDR='ZRMS SUBSYS ERROR; nnnnnnn ?0000/00000000',        +
+               SDATA=(SQA,CSA,NUC,LSQA,RGN,LPA,TRT),MF=L
+SDUMPL   EQU   *-SDUMP
+SDUMPMAX DS    0XL(84-SDUMPL+1)        ZRWA map restriction
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*--------+---------+---------+---------+---------+---------+---------+*
+*        Server Data Areas                                            *
+*--------+---------+---------+---------+---------+---------+---------+*
+         PRINT GEN
+         ZSVT  ,
+         ZRWA  ,
+         ZGEQU ,
+         ZMACS GEN=TOKEN,DSECT=YES
+         ZTABS GEN=SVMACRO
+*---------------------------------------------------------------------*
+*        System Data Areas                                            *
+*--------+---------+---------+---------+---------+---------+---------+*
+         PRINT NOGEN
+         IHAPSA ,
+         IHASCB ,
+         IHAASCB ,
+         IHAASSB ,
+         IHAASXB ,
+         IHASDWA ,
+         CVT   DSECT=YES
+         IKJTCB DSECT=YES
+         IKJRB DSECT=YES
+         IHAXSB LIST=YES
+         DCBD  DSORG=PS,DEVD=DA
+         END

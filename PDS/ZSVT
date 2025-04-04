@@ -1,0 +1,816 @@
+         MACRO
+         ZSVT  &DSECT=YES,&LIST=YES
+         COPY  ZGBLS
+*/*******************************************************************/
+*/*                                                                 */
+*/* Name:         ZSVT                                              */
+*/*                                                                 */
+*/* Description:  The ZSVT is a collection of address vectors,      */
+*/*               constants, queue anchors and counters common      */
+*/*               to all ZRMS subsystem routines.                   */
+*/*                                                                 */
+*/* Attributes:   Subpool 245                                       */
+*/*               Key=0                                             */
+*/*                                                                 */
+*/* Residency:    Above the line                                    */
+*/*                                                                 */
+*/* Restrictions: All offsets fixed by ZRMS architecture            */
+*/*                                                                 */
+*/* Copyright:    Ben Marino. 2021 - 2023 (unpublished)             */
+*/*                                                                 */
+*/*******************************************************************/
+*---------------------------CHANGE LOG-------------------------------*
+*                                                                    *
+* ID    Rel    Date       Author        Comments                     *
+*--------------------------------------------------------------------*
+* @01 | V1R1 | 09242022 | Ben Marino  | Initial version              *
+* @02 | V1R1 | 02172023 | Ben Marino  | Serviceability enhancements  *
+*     |      |          |             |                              *
+*     |      |          |             |                              *
+**********************************************************************
+*--------+---------+---------+---------+---------+---------+--------+*
+         PUSH  PRINT
+         AIF   ('&LIST' EQ 'YES').SVT010
+         PRINT OFF
+.SVT010  ANOP  ,
+         AIF   ('&DSECT' EQ 'NO').SVT020
+ZSVT     DSECT ,
+ZSVTID   DC    CL4'ZSVT'
+         AGO   .SVT030
+.SVT020  ANOP  ,
+ZSVT     DS    0F
+ZSVTID   DC    CL4'ZSVT'
+.SVT030  ANOP  ,
+*
+**       Subsystem control flags
+*
+ZSVTFLGS DS    0XL4
+ZSVTFLG1 DC    XL1'00'             flags
+ZSVT@ACT EQU   X'80'               subsystem is active
+ZSVT@INI EQU   X'40'               subsystem initialization complete
+ZSVT@TRM EQU   X'20'               subsystem termination complete
+ZSVT@ABN EQU   X'10'               subsystem terminated abnormally
+ZSVT@SSI EQU   X'08'               SSI listeners activated indicator
+ZSVT@SVC EQU   X'04'               SVC update successful indicator
+ZSVT@SQA EQU   X'02'               SQA ZSVT residency indicator    @02C
+ZSVT@ROZ EQU   X'01'               READONLY ZSVT residency ind.    @02C
+         DC    0X
+ZSVTFLG2 DC    XL1'50'             {CMP=YES|CON=YES} preset defaults
+ZSVT@TRC EQU   X'80'               INITPARM TRC={ON|OFF} indicator
+ZSVT@CMP EQU   X'40'               INITPARM CMP={NO|YES} indicator
+ZSVT@DMP EQU   X'20'               INITPARM DMP={NO|YES} indicator
+ZSVT@CON EQU   X'10'               INITPARM CON={NO|YES} indicator
+ZSVT@SAF EQU   X'08'               INITPARM SAF=class specified
+ZSVT@SMF EQU   X'04'               INITPARM SMF=nnn indicator
+ZSVT@G7C EQU   X'02'               IEAVG700 WTO enable indicator
+ZSVT@V27 EQU   X'01'               -available
+         DC    0X
+ZSVTFLG3 DC    XL1'00'             flags
+ZSVT@V30 EQU   X'80'               -available
+ZSVT@V31 EQU   X'40'               -available
+ZSVT@V32 EQU   X'20'               -available
+ZSVT@V33 EQU   X'10'               -available
+ZSVT@V34 EQU   X'08'               -available
+ZSVT@V35 EQU   X'04'               -available
+ZSVT@V36 EQU   X'02'               -available
+ZSVT@V37 EQU   X'01'               -available
+         DC    0X
+ZSVTFLG4 DC    XL1'00'             flags
+ZSVT@V40 EQU   X'80'               -available
+ZSVT@V41 EQU   X'40'               -available
+ZSVT@V42 EQU   X'20'               -available
+ZSVT@V43 EQU   X'10'               -available
+ZSVT@V44 EQU   X'08'               -available
+ZSVT@V45 EQU   X'04'               -available
+ZSVT@V46 EQU   X'02'               -available
+ZSVT@V47 EQU   X'01'               -available
+*
+**       Subsystem fixed offsets
+*
+ZSVTFX   DS    0A
+ZSVTSIZE DC    A(0)                ZSVT size
+ZSVTZSVT DC    A(0)                ZSVT address
+ZSVTSSCT DC    A(0)                SSCT address
+ZSVTXRMS DC    A(0)                RMSSRV address
+ZSVTMSGA DC    A(0)                RMSMSG address
+ZSVTRTMA DC    A(0)                RMSRTM address
+ZSVTITKN DC    A(0)                ZRMS instance token
+ZSVTLGXE DC    A(0)                LGXE address (debug only)
+ZSVTKEY0 DC    A(0)                supervisor key
+ZSVTKEY1 DC    A(0)                scheduler key
+ZSVTSUBN DC    CL4'ZRMS'           subsystem name
+ZSVTLPTK DC    XL8'0'              RMSSRV delete token
+ZSVTFX99 DC    XL8'0'              -available
+ZSVT@FXZ EQU   *-ZSVTFX
+*
+**       SVC screening data fixed offsets
+*
+ZSVTSVC  DS    0H                  SVCXIT
+ZSVTRACE DS    0H                  ZTRCE
+ZSVTUSVC DC    XL1'0A'             -SVC OPcode
+ZSVTSVCN DC    XL1'0D'             -SVC=0D (ABEND) default
+ZSVTBR14 DC    XL2'&ZTRC'          -BR R14 instruction
+ZSVTXERO DC    XL2'0000'           -must be zero - DONOT use
+ZSVTSMFN DC    XL1'00'             -SMF=nnn record number
+ZSVTZRXR DC    XL1'00'             -reserved
+ZSVTARCH EQU   *-ZSVTSVC           DONOT change order
+         DS    0A
+ZSVT@SVZ EQU   *-ZSVTSVC
+ZSVTSVCA DC    V(SVCXIT)           SVC back-end routine
+ZSVTSVCT DC    A(0)                SVC table entry address
+ZSVTSVSC DC    A(0)                SVC screening front-end count
+ZSVTSVCC DC    A(0)                SVC screening back-end count
+ZSVTOBTC DC    A(0)                STORAGE OBTAIN front-end count
+ZSVTRELC DC    A(0)                STORAGE RELEASE back-end count
+ZSVT60CT DC    A(0)                IEFSD060 SVC screening count
+ZSVTSVRB DC    A(0)                SVRB issued SVC count
+ZSVTRBCT DC    A(0)                PRB issued SVC count
+ZSVTPCNM DC    A(0)                STORAGE OBTAIN/RELEASE EX/LX
+ZSVTSVCD DC    CL3'013'            SVC=013 default (ABEND)
+ZSVTSMFD DC    CL3'NO'             SMF={NO|nnn} decimal value
+*
+**       General subsystem data
+*
+ZSVTGENR DS    0A
+ZSVTXRC  DC    A(0)                SMF IEFWTM RC
+ZSVTSTAB DC    A(0)                STAB table address
+ZSVTRAV2 DC    A(0)                -available
+ZSVTRSV3 DC    A(0)                -available
+ZSVTRSA4 DC    A(0)                -available
+ZSVTRSA5 DC    A(0)                -available
+ZSVTRSA6 DC    A(0)                -available
+ZSVTRSA7 DC    A(0)                -available
+         DS    0F
+ZSVTSSIC DC    F'0'                RMSSSI entry count
+ZSVTCMDC DC    F'0'                RMSCMD entry count
+ZSVTEOTC DC    F'0'                RMSEOT entry count
+ZSVTWTOC DC    F'0'                RMSWTO entry count
+ZSVTALOC DC    F'0'                ALLOSSI entry count
+ZSVTUNLC DC    F'0'                ANALSSI entry count
+ZSVTLOGC DC    F'0'                RMSLOG log record count
+ZSVTSMFC DC    F'0'                RMSLOG SMF record count
+ZSVTSVCE DC    F'0'                SVCE LSQA address - tracing only
+ZSVTSVXA DC    F'0'                SVX LSQA address - tracing only
+ZSVTSPNA DC    F'0'                SPNTAB LSQA address - tracing only
+ZSVTSVNA DC    F'0'                SVNTAB LSQA address - tracing only
+ZSVTSVXE DC    F'0'                SVXE LSQA address- tracing only
+*
+**       SSVT subsystem vector table
+*
+ZSVTSTR  DC    CL8'SSVTSTRT'       SSVT ID
+ZSVTSSVT DS    0D
+ZSVTMTRX ZTABS GEN=SSI,DSECT=NO    SSVT table
+ZSVTSSVZ EQU   *-ZSVTSSVT          SSVT table length
+ZSVTEND  DC    CL8'SSVTENDS'       SSVT ID
+*
+**       Common subsystem constants
+*
+ZSVTDFLT DS    0F
+ZSVTAR0F DC    XL64'0'             AR0-AR15 ALET zero values
+         DS    0D
+ZSVTZINI DC    CL8'RMSINI'         initialization module
+ZSVTZRMS DC    CL8'&SERVER'        subsystem server name
+ZSVTZSVL DC    CL8'&LOGGER'        subsystem logger name
+         DS    0C
+ZSVTCSZE DC    AL1(8)              SAF class length
+ZSVTCLAS DC    CL8' '              SAF class name
+ZSVTCONS DC    CL8' '              console name
+ZSVTSYSN DC    CL8' '              CVTSNAME
+ZSVTLPAR DC    CL8' '              LPAR name
+ZSVTVMID DC    CL8' '              VM host ID
+ZSVTWZR0 DC    CL8' '              -available
+ZSVTWZR1 DC    CL8' '              -available
+ZSVTWZR2 DC    CL8' '              -available
+ZSVTWZR3 DC    CL8' '              -available
+ZSVTWZR4 DC    CL8' '              -available
+         DS    0F
+ZSVTPARM DC    CL60' '             INITPARM string
+ZSVTPAR2 DC    CL60' '             parameter data
+ZSVT@PLN EQU   *-ZSVTPARM          INITPARM length
+ZSVTZCNV DC    CL16'0123456789ABCDEF' conversion table
+*
+**       Subsystem debugging data
+*
+ZSVTSRVC DS    0C
+ZSVTDOTS DC    39C'.'              39-dots     (DONOT change)
+ZSVTZERO DC    8X'00'              8-hex zeros (DONOT change)
+ZSVTBLKS DC    256C' '             256-blanks  (DONOT change)
+ZSVTZONE DC    CL8'00000000'       8-numerics  (DONOT change)
+ZSVT@SRZ EQU   *-ZSVTSRVC
+*
+ZSVTDBUG DC    CL128' '            debug message workarea
+ZSVT@DBZ EQU   *-ZSVTDBUG          workarea length
+*
+**       INI= Stand-alone trace data
+*
+ZTRCIVID DC    CL4'INI='           trace ID
+ZTRCIVLX DC    CL8'RMSINI'         module name
+ZTRCIVIX DC    CL8'RMSINI'         routine name
+ZTRCINTR DS    0CL39               trace data
+ZTRCINIA DC    CL1'.'              -trace data
+ZTRCINIB DC    CL1'.'              -trace data
+ZTRCINIC DC    CL1'.'              -trace data
+ZTRCINID DC    CL1'.'              -trace data
+ZTRCINIE DC    CL1'.'              -trace data
+ZTRCINIF DC    CL1'.'              -trace data
+ZTRCINIG DC    CL1'.'              -trace data
+ZTRCINIH DC    CL1'.'              -trace data
+ZTRCINII DC    CL1'.'              -trace data
+ZTRCINIJ DC    CL1'.'              -trace data
+ZTRCINIK DC    CL1'.'              -trace data
+ZTRCINIL DC    CL1'.'              -trace data
+ZTRCINIM DC    CL1'.'              -trace data
+ZTRCININ DC    CL1'.'              -trace data
+ZTRCINIO DC    CL1'.'              -trace data
+ZTRCINIP DC    CL1'.'              -trace data
+ZTRCINIQ DC    CL1'.'              -trace data
+ZTRCINIR DC    CL1'.'              -trace data
+ZTRCINIS DC    CL1'.'              -trace data
+ZTRCINIT DC    CL1'.'              -trace data
+ZTRCINIU DC    CL1'.'              -trace data
+ZTRCINIV DC    CL1'.'              -trace data
+ZTRCINIW DC    CL1'.'              -trace data
+ZTRCINIX DC    CL1'.'              -trace data
+ZTRCINIY DC    CL1'.'              -trace data
+ZTRCINIZ DC    CL1'.'              -trace data
+ZTRCINI0 DC    CL1'.'              -trace data
+ZTRCINI1 DC    CL1'.'              -trace data
+ZTRCINI2 DC    CL1'.'              -trace data
+ZTRCINI3 DC    CL1'.'              -trace data
+ZTRCINI4 DC    CL1'.'              -trace data
+ZTRCINI5 DC    CL1'.'              -trace data
+ZTRCINI6 DC    CL1'.'              -trace data
+ZTRCINI7 DC    CL1'.'              -trace data
+ZTRCINI8 DC    CL1'.'              -trace data
+ZTRCINI9 DC    CL1'.'              -trace data
+ZTRCINI$ DC    CL1'.'              -trace data
+ZTRCINI# DC    CL1'.'              -trace data
+ZTRCINI@ DC    CL1'.'              -trace data
+ZTRC@INZ EQU   *-ZTRCINTR          trace data size
+*
+**       CMD= Stand-alone trace data
+*
+ZTRCCMID DC    CL4'CMD='           trace ID
+ZTRCCMLX DC    CL8'RMSCMD'         module name
+ZTRCCMIX DC    CL8'RMSCMD'         routine name
+ZTRCCMTR DS    0CL39               trace data
+ZTRCCMDA DC    CL1'.'              -trace data
+ZTRCCMDB DC    CL1'.'              -trace data
+ZTRCCMDC DC    CL1'.'              -trace data
+ZTRCCMDD DC    CL1'.'              -trace data
+ZTRCCMDE DC    CL1'.'              -trace data
+ZTRCCMDF DC    CL1'.'              -trace data
+ZTRCCMDG DC    CL1'.'              -trace data
+ZTRCCMDH DC    CL1'.'              -trace data
+ZTRCCMDI DC    CL1'.'              -trace data
+ZTRCCMDJ DC    CL1'.'              -trace data
+ZTRCCMDK DC    CL1'.'              -trace data
+ZTRCCMDL DC    CL1'.'              -trace data
+ZTRCCMDM DC    CL1'.'              -trace data
+ZTRCCMDN DC    CL1'.'              -trace data
+ZTRCCMDO DC    CL1'.'              -trace data
+ZTRCCMDP DC    CL1'.'              -trace data
+ZTRCCMDQ DC    CL1'.'              -trace data
+ZTRCCMDR DC    CL1'.'              -trace data
+ZTRCCMDS DC    CL1'.'              -trace data
+ZTRCCMDT DC    CL1'.'              -trace data
+ZTRCCMDU DC    CL1'.'              -trace data
+ZTRCCMDV DC    CL1'.'              -trace data
+ZTRCCMDW DC    CL1'.'              -trace data
+ZTRCCMDX DC    CL1'.'              -trace data
+ZTRCCMDY DC    CL1'.'              -trace data
+ZTRCCMDZ DC    CL1'.'              -trace data
+ZTRCCMD0 DC    CL1'.'              -trace data
+ZTRCCMD1 DC    CL1'.'              -trace data
+ZTRCCMD2 DC    CL1'.'              -trace data
+ZTRCCMD3 DC    CL1'.'              -trace data
+ZTRCCMD4 DC    CL1'.'              -trace data
+ZTRCCMD5 DC    CL1'.'              -trace data
+ZTRCCMD6 DC    CL1'.'              -trace data
+ZTRCCMD7 DC    CL1'.'              -trace data
+ZTRCCMD8 DC    CL1'.'              -trace data
+ZTRCCMD9 DC    CL1'.'              -trace data
+ZTRCCMD$ DC    CL1'.'              -trace data
+ZTRCCMD# DC    CL1'.'              -trace data
+ZTRCCMD@ DC    CL1'.'              -trace data
+ZTRC@CMZ EQU   *-ZTRCCMTR          trace data size
+*
+**       EOT= Stand-alone trace data
+*
+ZTRCETID DC    CL4'EOT='           trace ID
+ZTRCETLX DC    CL8'RMSEOT'         module name
+ZTRCETIX DC    CL8'RMSEOT'         routine name
+ZTRCETTR DS    0CL39               trace data
+ZTRCEOTA DC    CL1'.'              -trace data
+ZTRCEOTB DC    CL1'.'              -trace data
+ZTRCEOTC DC    CL1'.'              -trace data
+ZTRCEOTD DC    CL1'.'              -trace data
+ZTRCEOTE DC    CL1'.'              -trace data
+ZTRCEOTF DC    CL1'.'              -trace data
+ZTRCEOTG DC    CL1'.'              -trace data
+ZTRCEOTH DC    CL1'.'              -trace data
+ZTRCEOTI DC    CL1'.'              -trace data
+ZTRCEOTJ DC    CL1'.'              -trace data
+ZTRCEOTK DC    CL1'.'              -trace data
+ZTRCEOTL DC    CL1'.'              -trace data
+ZTRCEOTM DC    CL1'.'              -trace data
+ZTRCEOTN DC    CL1'.'              -trace data
+ZTRCEOTO DC    CL1'.'              -trace data
+ZTRCEOTP DC    CL1'.'              -trace data
+ZTRCEOTQ DC    CL1'.'              -trace data
+ZTRCEOTR DC    CL1'.'              -trace data
+ZTRCEOTS DC    CL1'.'              -trace data
+ZTRCEOTT DC    CL1'.'              -trace data
+ZTRCEOTU DC    CL1'.'              -trace data
+ZTRCEOTV DC    CL1'.'              -trace data
+ZTRCEOTW DC    CL1'.'              -trace data
+ZTRCEOTX DC    CL1'.'              -trace data
+ZTRCEOTY DC    CL1'.'              -trace data
+ZTRCEOTZ DC    CL1'.'              -trace data
+ZTRCEOT0 DC    CL1'.'              -trace data
+ZTRCEOT1 DC    CL1'.'              -trace data
+ZTRCEOT2 DC    CL1'.'              -trace data
+ZTRCEOT3 DC    CL1'.'              -trace data
+ZTRCEOT4 DC    CL1'.'              -trace data
+ZTRCEOT5 DC    CL1'.'              -trace data
+ZTRCEOT6 DC    CL1'.'              -trace data
+ZTRCEOT7 DC    CL1'.'              -trace data
+ZTRCEOT8 DC    CL1'.'              -trace data
+ZTRCEOT9 DC    CL1'.'              -trace data
+ZTRCEOT$ DC    CL1'.'              -trace data
+ZTRCEOT# DC    CL1'.'              -trace data
+ZTRCEOT@ DC    CL1'.'              -trace data
+ZTRC@ETZ EQU   *-ZTRCETTR          trace data size
+*
+**       WTO= Stand-alone trace data
+*
+ZTRWTOID DC    CL4'WTO='           trace ID
+ZTRCWTLX DC    CL8'RMSWTO'         module name
+ZTRCWTIX DC    CL8'RMSWTO'         routine name
+ZTRCWTTR DS    0CL39               trace data
+ZTRCWTOA DC    CL1'.'              -trace data
+ZTRCWTOB DC    CL1'.'              -trace data
+ZTRCWTOC DC    CL1'.'              -trace data
+ZTRCWTOD DC    CL1'.'              -trace data
+ZTRCWTOE DC    CL1'.'              -trace data
+ZTRCWTOF DC    CL1'.'              -trace data
+ZTRCWTOG DC    CL1'.'              -trace data
+ZTRCWTOH DC    CL1'.'              -trace data
+ZTRCWTOI DC    CL1'.'              -trace data
+ZTRCWTOJ DC    CL1'.'              -trace data
+ZTRCWTOK DC    CL1'.'              -trace data
+ZTRCWTOL DC    CL1'.'              -trace data
+ZTRCWTOM DC    CL1'.'              -trace data
+ZTRCWTON DC    CL1'.'              -trace data
+ZTRCWTOO DC    CL1'.'              -trace data
+ZTRCWTOP DC    CL1'.'              -trace data
+ZTRCWTOQ DC    CL1'.'              -trace data
+ZTRCWTOR DC    CL1'.'              -trace data
+ZTRCWTOS DC    CL1'.'              -trace data
+ZTRCWTOT DC    CL1'.'              -trace data
+ZTRCWTOU DC    CL1'.'              -trace data
+ZTRCWTOV DC    CL1'.'              -trace data
+ZTRCWTOW DC    CL1'.'              -trace data
+ZTRCWTOX DC    CL1'.'              -trace data
+ZTRCWTOY DC    CL1'.'              -trace data
+ZTRCWTOZ DC    CL1'.'              -trace data
+ZTRCWTO0 DC    CL1'.'              -trace data
+ZTRCWTO1 DC    CL1'.'              -trace data
+ZTRCWTO2 DC    CL1'.'              -trace data
+ZTRCWTO3 DC    CL1'.'              -trace data
+ZTRCWTO4 DC    CL1'.'              -trace data
+ZTRCWTO5 DC    CL1'.'              -trace data
+ZTRCWTO6 DC    CL1'.'              -trace data
+ZTRCWTO7 DC    CL1'.'              -trace data
+ZTRCWTO8 DC    CL1'.'              -trace data
+ZTRCWTO9 DC    CL1'.'              -trace data
+ZTRCWTO$ DC    CL1'.'              -trace data
+ZTRCWTO# DC    CL1'.'              -trace data
+ZTRCWTO@ DC    CL1'.'              -trace data
+ZTRC@WTZ EQU   *-ZTRCWTTR          trace data size
+*
+**       SSI= Stand-alone trace data
+*
+ZTRCSUID DC    CL4'SSI='           trace ID
+ZTRCSULX DC    CL8'RMSSSI'         module name
+ZTRCSUIX DC    CL8'RMSSSI'         routine name
+ZTRCSUTR DS    0CL39               trace data
+ZTRCSSIA DC    CL1'.'              -trace data
+ZTRCSSIB DC    CL1'.'              -trace data
+ZTRCSSIC DC    CL1'.'              -trace data
+ZTRCSSID DC    CL1'.'              -trace data
+ZTRCSSIE DC    CL1'.'              -trace data
+ZTRCSSIF DC    CL1'.'              -trace data
+ZTRCSSIG DC    CL1'.'              -trace data
+ZTRCSSIH DC    CL1'.'              -trace data
+ZTRCSSII DC    CL1'.'              -trace data
+ZTRCSSIJ DC    CL1'.'              -trace data
+ZTRCSSIK DC    CL1'.'              -trace data
+ZTRCSSIL DC    CL1'.'              -trace data
+ZTRCSSIM DC    CL1'.'              -trace data
+ZTRCSSIN DC    CL1'.'              -trace data
+ZTRCSSIO DC    CL1'.'              -trace data
+ZTRCSSIP DC    CL1'.'              -trace data
+ZTRCSSIQ DC    CL1'.'              -trace data
+ZTRCSSIR DC    CL1'.'              -trace data
+ZTRCSSIS DC    CL1'.'              -trace data
+ZTRCSSIT DC    CL1'.'              -trace data
+ZTRCSSIU DC    CL1'.'              -trace data
+ZTRCSSIV DC    CL1'.'              -trace data
+ZTRCSSIW DC    CL1'.'              -trace data
+ZTRCSSIX DC    CL1'.'              -trace data
+ZTRCSSIY DC    CL1'.'              -trace data
+ZTRCSSIZ DC    CL1'.'              -trace data
+ZTRCSSI0 DC    CL1'.'              -trace data
+ZTRCSSI1 DC    CL1'.'              -trace data
+ZTRCSSI2 DC    CL1'.'              -trace data
+ZTRCSSI3 DC    CL1'.'              -trace data
+ZTRCSSI4 DC    CL1'.'              -trace data
+ZTRCSSI5 DC    CL1'.'              -trace data
+ZTRCSSI6 DC    CL1'.'              -trace data
+ZTRCSSI7 DC    CL1'.'              -trace data
+ZTRCSSI8 DC    CL1'.'              -trace data
+ZTRCSSI9 DC    CL1'.'              -trace data
+ZTRCSSI$ DC    CL1'.'              -trace data
+ZTRCSSI# DC    CL1'.'              -trace data
+ZTRCSSI@ DC    CL1'.'              -trace data
+ZTRC@UBZ EQU   *-ZTRCSUTR          trace data size
+*
+**       PAR= Stand-alone trace data
+*
+ZTRCPAID DC    CL4'PAR='           trace ID
+ZTRCPALX DC    CL8'RMSSSI'         module name
+ZTRCPAIX DC    CL8'ZPARSER'        routine name
+ZTRCPATR DS    0CL39               trace data
+ZTRCPARA DC    CL1'.'              -trace data
+ZTRCPARB DC    CL1'.'              -trace data
+ZTRCPARC DC    CL1'.'              -trace data
+ZTRCPARD DC    CL1'.'              -trace data
+ZTRCPARE DC    CL1'.'              -trace data
+ZTRCPARF DC    CL1'.'              -trace data
+ZTRCPARG DC    CL1'.'              -trace data
+ZTRCPARH DC    CL1'.'              -trace data
+ZTRCPARI DC    CL1'.'              -trace data
+ZTRCPARJ DC    CL1'.'              -trace data
+ZTRCPARK DC    CL1'.'              -trace data
+ZTRCPARL DC    CL1'.'              -trace data
+ZTRCPARM DC    CL1'.'              -trace data
+ZTRCPARN DC    CL1'.'              -trace data
+ZTRCPARO DC    CL1'.'              -trace data
+ZTRCPARP DC    CL1'.'              -trace data
+ZTRCPARQ DC    CL1'.'              -trace data
+ZTRCPARR DC    CL1'.'              -trace data
+ZTRCPARS DC    CL1'.'              -trace data
+ZTRCPART DC    CL1'.'              -trace data
+ZTRCPARU DC    CL1'.'              -trace data
+ZTRCPARV DC    CL1'.'              -trace data
+ZTRCPARW DC    CL1'.'              -trace data
+ZTRCPARX DC    CL1'.'              -trace data
+ZTRCPARY DC    CL1'.'              -trace data
+ZTRCPARZ DC    CL1'.'              -trace data
+ZTRCPAR0 DC    CL1'.'              -trace data
+ZTRCPAR1 DC    CL1'.'              -trace data
+ZTRCPAR2 DC    CL1'.'              -trace data
+ZTRCPAR3 DC    CL1'.'              -trace data
+ZTRCPAR4 DC    CL1'.'              -trace data
+ZTRCPAR5 DC    CL1'.'              -trace data
+ZTRCPAR6 DC    CL1'.'              -trace data
+ZTRCPAR7 DC    CL1'.'              -trace data
+ZTRCPAR8 DC    CL1'.'              -trace data
+ZTRCPAR9 DC    CL1'.'              -trace data
+ZTRCPAR$ DC    CL1'.'              -trace data
+ZTRCPAR# DC    CL1'.'              -trace data
+ZTRCPAR@ DC    CL1'.'              -trace data
+ZTRC@PAZ EQU   *-ZTRCPATR          trace data size
+*
+**       SVS= Stand-alone trace data
+*
+ZTRCVSID DC    CL4'SVS='           trace ID
+ZTRCVSLX DC    CL8'RMSSVC'         module name
+ZTRCVSIX DC    CL8'RMSSVS'         routine name
+ZTRCVSTR DS    0CL39               trace data
+ZTRCSVSA DC    CL1'.'              -trace data
+ZTRCSVSB DC    CL1'.'              -trace data
+ZTRCSVSC DC    CL1'.'              -trace data
+ZTRCSVSD DC    CL1'.'              -trace data
+ZTRCSVSE DC    CL1'.'              -trace data
+ZTRCSVSF DC    CL1'.'              -trace data
+ZTRCSVSG DC    CL1'.'              -trace data
+ZTRCSVSH DC    CL1'.'              -trace data
+ZTRCSVSI DC    CL1'.'              -trace data
+ZTRCSVSJ DC    CL1'.'              -trace data
+ZTRCSVSK DC    CL1'.'              -trace data
+ZTRCSVSL DC    CL1'.'              -trace data
+ZTRCSVSM DC    CL1'.'              -trace data
+ZTRCSVSN DC    CL1'.'              -trace data
+ZTRCSVSO DC    CL1'.'              -trace data
+ZTRCSVSP DC    CL1'.'              -trace data
+ZTRCSVSQ DC    CL1'.'              -trace data
+ZTRCSVSR DC    CL1'.'              -trace data
+ZTRCSVSS DC    CL1'.'              -trace data
+ZTRCSVST DC    CL1'.'              -trace data
+ZTRCSVSU DC    CL1'.'              -trace data
+ZTRCSVSV DC    CL1'.'              -trace data
+ZTRCSVSW DC    CL1'.'              -trace data
+ZTRCSVSX DC    CL1'.'              -trace data
+ZTRCSVSY DC    CL1'.'              -trace data
+ZTRCSVSZ DC    CL1'.'              -trace data
+ZTRCSVS0 DC    CL1'.'              -trace data
+ZTRCSVS1 DC    CL1'.'              -trace data
+ZTRCSVS2 DC    CL1'.'              -trace data
+ZTRCSVS3 DC    CL1'.'              -trace data
+ZTRCSVS4 DC    CL1'.'              -trace data
+ZTRCSVS5 DC    CL1'.'              -trace data
+ZTRCSVS6 DC    CL1'.'              -trace data
+ZTRCSVS7 DC    CL1'.'              -trace data
+ZTRCSVS8 DC    CL1'.'              -trace data
+ZTRCSVS9 DC    CL1'.'              -trace data
+ZTRCSVS$ DC    CL1'.'              -trace data
+ZTRCSVS# DC    CL1'.'              -trace data
+ZTRCSVS@ DC    CL1'.'              -trace data
+ZTRC@VSZ EQU   *-ZTRCVSTR          trace data size
+*
+**       SVC= Stand-alone trace data
+*
+ZTRCSVID DC    CL4'SVC='           trace ID
+ZTRCSVLX DC    CL8'RMSSVC'         module name
+ZTRCSVIX DC    CL8'RMSXIT'         routine name
+ZTRCSVTR DS    0CL39               trace data
+ZTRCSVCA DC    CL1'.'              -trace data
+ZTRCSVCB DC    CL1'.'              -trace data
+ZTRCSVCC DC    CL1'.'              -trace data
+ZTRCSVCD DC    CL1'.'              -trace data
+ZTRCSVCE DC    CL1'.'              -trace data
+ZTRCSVCF DC    CL1'.'              -trace data
+ZTRCSVCG DC    CL1'.'              -trace data
+ZTRCSVCH DC    CL1'.'              -trace data
+ZTRCSVCI DC    CL1'.'              -trace data
+ZTRCSVCJ DC    CL1'.'              -trace data
+ZTRCSVCK DC    CL1'.'              -trace data
+ZTRCSVCL DC    CL1'.'              -trace data
+ZTRCSVCM DC    CL1'.'              -trace data
+ZTRCSVCN DC    CL1'.'              -trace data
+ZTRCSVCO DC    CL1'.'              -trace data
+ZTRCSVCP DC    CL1'.'              -trace data
+ZTRCSVCQ DC    CL1'.'              -trace data
+ZTRCSVCR DC    CL1'.'              -trace data
+ZTRCSVCS DC    CL1'.'              -trace data
+ZTRCSVCT DC    CL1'.'              -trace data
+ZTRCSVCU DC    CL1'.'              -trace data
+ZTRCSVCV DC    CL1'.'              -trace data
+ZTRCSVCW DC    CL1'.'              -trace data
+ZTRCSVCX DC    CL1'.'              -trace data
+ZTRCSVCY DC    CL1'.'              -trace data
+ZTRCSVCZ DC    CL1'.'              -trace data
+ZTRCSVC0 DC    CL1'.'              -trace data
+ZTRCSVC1 DC    CL1'.'              -trace data
+ZTRCSVC2 DC    CL1'.'              -trace data
+ZTRCSVC3 DC    CL1'.'              -trace data
+ZTRCSVC4 DC    CL1'.'              -trace data
+ZTRCSVC5 DC    CL1'.'              -trace data
+ZTRCSVC6 DC    CL1'.'              -trace data
+ZTRCSVC7 DC    CL1'.'              -trace data
+ZTRCSVC8 DC    CL1'.'              -trace data
+ZTRCSVC9 DC    CL1'.'              -trace data
+ZTRCSVC$ DC    CL1'.'              -trace data
+ZTRCSVC# DC    CL1'.'              -trace data
+ZTRCSVC@ DC    CL1'.'              -trace data
+ZTRC@VCZ EQU   *-ZTRCSVTR          trace data size
+*
+**       LOG= Stand-alone trace data
+*
+ZTRCLGID DC    CL4'LOG='           trace ID
+ZTRCLGLX DC    CL8'RMSLOG'         module name
+ZTRCLGIX DC    CL8'RMSLOG'         routine name
+ZTRCLGTR DS    0CL39               trace data
+ZTRCLOGA DC    CL1'.'              -trace data
+ZTRCLOGB DC    CL1'.'              -trace data
+ZTRCLOGC DC    CL1'.'              -trace data
+ZTRCLOGD DC    CL1'.'              -trace data
+ZTRCLOGE DC    CL1'.'              -trace data
+ZTRCLOGF DC    CL1'.'              -trace data
+ZTRCLOGG DC    CL1'.'              -trace data
+ZTRCLOGH DC    CL1'.'              -trace data
+ZTRCLOGI DC    CL1'.'              -trace data
+ZTRCLOGJ DC    CL1'.'              -trace data
+ZTRCLOGK DC    CL1'.'              -trace data
+ZTRCLOGL DC    CL1'.'              -trace data
+ZTRCLOGM DC    CL1'.'              -trace data
+ZTRCLOGN DC    CL1'.'              -trace data
+ZTRCLOGO DC    CL1'.'              -trace data
+ZTRCLOGP DC    CL1'.'              -trace data
+ZTRCLOGQ DC    CL1'.'              -trace data
+ZTRCLOGR DC    CL1'.'              -trace data
+ZTRCLOGS DC    CL1'.'              -trace data
+ZTRCLOGT DC    CL1'.'              -trace data
+ZTRCLOGU DC    CL1'.'              -trace data
+ZTRCLOGV DC    CL1'.'              -trace data
+ZTRCLOGW DC    CL1'.'              -trace data
+ZTRCLOGX DC    CL1'.'              -trace data
+ZTRCLOGY DC    CL1'.'              -trace data
+ZTRCLOGZ DC    CL1'.'              -trace data
+ZTRCLOG0 DC    CL1'.'              -trace data
+ZTRCLOG1 DC    CL1'.'              -trace data
+ZTRCLOG2 DC    CL1'.'              -trace data
+ZTRCLOG3 DC    CL1'.'              -trace data
+ZTRCLOG4 DC    CL1'.'              -trace data
+ZTRCLOG5 DC    CL1'.'              -trace data
+ZTRCLOG6 DC    CL1'.'              -trace data
+ZTRCLOG7 DC    CL1'.'              -trace data
+ZTRCLOG8 DC    CL1'.'              -trace data
+ZTRCLOG9 DC    CL1'.'              -trace data
+ZTRCLOG$ DC    CL1'.'              -trace data
+ZTRCLOG# DC    CL1'.'              -trace data
+ZTRCLOG@ DC    CL1'.'              -trace data
+ZTRC@LGZ EQU   *-ZTRCLGTR          trace data size
+*
+**       ALO= Stand-alone trace data
+*
+ZTRCALID DC    CL4'ALO='           trace ID
+ZTRCALLX DC    CL8'RMSSSI'         module name
+ZTRCALIX DC    CL8'ALLOSSI'        routine name
+ZTRCALTR DS    0CL39               trace data
+ZTRCALOA DC    CL1'.'              -trace data
+ZTRCALOB DC    CL1'.'              -trace data
+ZTRCALOC DC    CL1'.'              -trace data
+ZTRCALOD DC    CL1'.'              -trace data
+ZTRCALOE DC    CL1'.'              -trace data
+ZTRCALOF DC    CL1'.'              -trace data
+ZTRCALOG DC    CL1'.'              -trace data
+ZTRCALOH DC    CL1'.'              -trace data
+ZTRCALOI DC    CL1'.'              -trace data
+ZTRCALOJ DC    CL1'.'              -trace data
+ZTRCALOK DC    CL1'.'              -trace data
+ZTRCALOL DC    CL1'.'              -trace data
+ZTRCALOM DC    CL1'.'              -trace data
+ZTRCALON DC    CL1'.'              -trace data
+ZTRCALOO DC    CL1'.'              -trace data
+ZTRCALOP DC    CL1'.'              -trace data
+ZTRCALOQ DC    CL1'.'              -trace data
+ZTRCALOR DC    CL1'.'              -trace data
+ZTRCALOS DC    CL1'.'              -trace data
+ZTRCALOT DC    CL1'.'              -trace data
+ZTRCALOU DC    CL1'.'              -trace data
+ZTRCALOV DC    CL1'.'              -trace data
+ZTRCALOW DC    CL1'.'              -trace data
+ZTRCALOX DC    CL1'.'              -trace data
+ZTRCALOY DC    CL1'.'              -trace data
+ZTRCALOZ DC    CL1'.'              -trace data
+ZTRCALO0 DC    CL1'.'              -trace data
+ZTRCALO1 DC    CL1'.'              -trace data
+ZTRCALO2 DC    CL1'.'              -trace data
+ZTRCALO3 DC    CL1'.'              -trace data
+ZTRCALO4 DC    CL1'.'              -trace data
+ZTRCALO5 DC    CL1'.'              -trace data
+ZTRCALO6 DC    CL1'.'              -trace data
+ZTRCALO7 DC    CL1'.'              -trace data
+ZTRCALO8 DC    CL1'.'              -trace data
+ZTRCALO9 DC    CL1'.'              -trace data
+ZTRCALO$ DC    CL1'.'              -trace data
+ZTRCALO# DC    CL1'.'              -trace data
+ZTRCALO@ DC    CL1'.'              -trace data
+ZTRC@ALZ EQU   *-ZTRCALTR          trace data size
+*
+**       UNL= Stand-alone trace data
+*
+ZTRCUNID DC    CL4'UNL='           trace ID
+ZTRCUNLX DC    CL8'RMSSSI'         module name
+ZTRCUNIX DC    CL8'UNALSSI'        routine name
+ZTRCUNTR DS    0CL39               trace data
+ZTRCUNLA DC    CL1'.'              -trace data
+ZTRCUNLB DC    CL1'.'              -trace data
+ZTRCUNLC DC    CL1'.'              -trace data
+ZTRCUNLD DC    CL1'.'              -trace data
+ZTRCUNLE DC    CL1'.'              -trace data
+ZTRCUNLF DC    CL1'.'              -trace data
+ZTRCUNLG DC    CL1'.'              -trace data
+ZTRCUNLH DC    CL1'.'              -trace data
+ZTRCUNLI DC    CL1'.'              -trace data
+ZTRCUNLJ DC    CL1'.'              -trace data
+ZTRCUNLK DC    CL1'.'              -trace data
+ZTRCUNLL DC    CL1'.'              -trace data
+ZTRCUNLM DC    CL1'.'              -trace data
+ZTRCUNLN DC    CL1'.'              -trace data
+ZTRCUNLO DC    CL1'.'              -trace data
+ZTRCUNLP DC    CL1'.'              -trace data
+ZTRCUNLQ DC    CL1'.'              -trace data
+ZTRCUNLR DC    CL1'.'              -trace data
+ZTRCUNLS DC    CL1'.'              -trace data
+ZTRCUNLT DC    CL1'.'              -trace data
+ZTRCUNLU DC    CL1'.'              -trace data
+ZTRCUNLV DC    CL1'.'              -trace data
+ZTRCUNLW DC    CL1'.'              -trace data
+ZTRCULLX DC    CL1'.'              -trace data
+ZTRCUNLY DC    CL1'.'              -trace data
+ZTRCUNLZ DC    CL1'.'              -trace data
+ZTRCUNL0 DC    CL1'.'              -trace data
+ZTRCUNL1 DC    CL1'.'              -trace data
+ZTRCUNL2 DC    CL1'.'              -trace data
+ZTRCUNL3 DC    CL1'.'              -trace data
+ZTRCUNL4 DC    CL1'.'              -trace data
+ZTRCUNL5 DC    CL1'.'              -trace data
+ZTRCUNL6 DC    CL1'.'              -trace data
+ZTRCUNL7 DC    CL1'.'              -trace data
+ZTRCUNL8 DC    CL1'.'              -trace data
+ZTRCUNL9 DC    CL1'.'              -trace data
+ZTRCUNL$ DC    CL1'.'              -trace data
+ZTRCUNL# DC    CL1'.'              -trace data
+ZTRCUNL@ DC    CL1'.'              -trace data
+ZTRC@UNZ EQU   *-ZTRCUNTR          trace data size
+*
+**       SPN= Stand-alone trace data
+*
+ZTRCSPID DC    CL4'SPN='           trace ID
+ZTRCSPNX DC    CL8'RMSSSI'         module name
+ZTRCSPIX DC    CL8'SPNPRO'         routine name
+ZTRCSPTR DS    0CL39               trace data
+ZTRCSPNA DC    CL1'.'              -trace data
+ZTRCSPNB DC    CL1'.'              -trace data
+ZTRCSPNC DC    CL1'.'              -trace data
+ZTRCSPND DC    CL1'.'              -trace data
+ZTRCSPNE DC    CL1'.'              -trace data
+ZTRCSPNF DC    CL1'.'              -trace data
+ZTRCSPNG DC    CL1'.'              -trace data
+ZTRCSPNH DC    CL1'.'              -trace data
+ZTRCSPNI DC    CL1'.'              -trace data
+ZTRCSPNJ DC    CL1'.'              -trace data
+ZTRCSPNK DC    CL1'.'              -trace data
+ZTRCSPNL DC    CL1'.'              -trace data
+ZTRCSPNM DC    CL1'.'              -trace data
+ZTRCSPNN DC    CL1'.'              -trace data
+ZTRCSPNO DC    CL1'.'              -trace data
+ZTRCSPNP DC    CL1'.'              -trace data
+ZTRCSPNQ DC    CL1'.'              -trace data
+ZTRCSPNR DC    CL1'.'              -trace data
+ZTRCSPNS DC    CL1'.'              -trace data
+ZTRCSPNT DC    CL1'.'              -trace data
+ZTRCSPNU DC    CL1'.'              -trace data
+ZTRCSPNV DC    CL1'.'              -trace data
+ZTRCSPNW DC    CL1'.'              -trace data
+ZTRCSPXX DC    CL1'.'              -trace data
+ZTRCSPNY DC    CL1'.'              -trace data
+ZTRCSPNZ DC    CL1'.'              -trace data
+ZTRCSPN0 DC    CL1'.'              -trace data
+ZTRCSPN1 DC    CL1'.'              -trace data
+ZTRCSPN2 DC    CL1'.'              -trace data
+ZTRCSPN3 DC    CL1'.'              -trace data
+ZTRCSPN4 DC    CL1'.'              -trace data
+ZTRCSPN5 DC    CL1'.'              -trace data
+ZTRCSPN6 DC    CL1'.'              -trace data
+ZTRCSPN7 DC    CL1'.'              -trace data
+ZTRCSPN8 DC    CL1'.'              -trace data
+ZTRCSPN9 DC    CL1'.'              -trace data
+ZTRCSPN$ DC    CL1'.'              -trace data
+ZTRCSPN# DC    CL1'.'              -trace data
+ZTRCSPN@ DC    CL1'.'              -trace data
+ZTRC@SPZ EQU   *-ZTRCSPTR          trace data size
+*
+**       ZTRC Stand-alone trace IDX
+*
+ZTRCXID  DS    0C
+ZTRCXIDA DC    CL1'A'              -trace IDx
+ZTRCXIDB DC    CL1'B'              -trace IDx
+ZTRCXIDC DC    CL1'C'              -trace IDx
+ZTRCXIDD DC    CL1'D'              -trace IDx
+ZTRCXIDE DC    CL1'E'              -trace IDx
+ZTRCXIDF DC    CL1'F'              -trace IDx
+ZTRCXIDG DC    CL1'G'              -trace IDx
+ZTRCXIDH DC    CL1'H'              -trace IDx
+ZTRCXIDI DC    CL1'I'              -trace IDx
+ZTRCXIDJ DC    CL1'J'              -trace IDx
+ZTRCXIDK DC    CL1'K'              -trace IDx
+ZTRCXIDL DC    CL1'L'              -trace IDx
+ZTRCXIDM DC    CL1'M'              -trace IDx
+ZTRCXIDN DC    CL1'N'              -trace IDx
+ZTRCXIDO DC    CL1'O'              -trace IDx
+ZTRCXIDP DC    CL1'P'              -trace IDx
+ZTRCXIDQ DC    CL1'Q'              -trace IDx
+ZTRCXIDR DC    CL1'R'              -trace IDx
+ZTRCXIDS DC    CL1'S'              -trace IDx
+ZTRCXIDT DC    CL1'T'              -trace IDx
+ZTRCXIDU DC    CL1'U'              -trace IDx
+ZTRCXIDV DC    CL1'V'              -trace IDx
+ZTRCXIDW DC    CL1'W'              -trace IDx
+ZTRCXIDX DC    CL1'X'              -trace IDx
+ZTRCXIDY DC    CL1'Y'              -trace IDx
+ZTRCXIDZ DC    CL1'Z'              -trace IDx
+ZTRCXID0 DC    CL1'0'              -trace IDx
+ZTRCXID1 DC    CL1'1'              -trace IDx
+ZTRCXID2 DC    CL1'2'              -trace IDx
+ZTRCXID3 DC    CL1'3'              -trace IDx
+ZTRCXID4 DC    CL1'4'              -trace IDx
+ZTRCXID5 DC    CL1'5'              -trace IDx
+ZTRCXID6 DC    CL1'6'              -trace IDx
+ZTRCXID7 DC    CL1'7'              -trace IDx
+ZTRCXID8 DC    CL1'8'              -trace IDx
+ZTRCXID9 DC    CL1'9'              -trace IDx
+ZTRCXID$ DC    CL1'$'              -trace IDx
+ZTRCXID# DC    CL1'#'              -trace IDx
+ZTRCXID@ DC    CL1'@'              -trace IDx
+ZRECX@ZS EQU   *-ZTRCXID
+         DS    0C
+ZSVT@END DC    CL8'ZSVTENDS'       end of ZSVT
+         DS    0D
+ZSVT@SZE EQU   *-ZSVT              ZSVT size
+         POP   PRINT
+         MEND  ,

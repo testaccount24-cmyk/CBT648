@@ -1,0 +1,152 @@
+*/*********************************************************************
+*/*
+*/*                           ZRMS
+*/*                 RESOURCE MONITOR SUBSYSTEM
+*/*                         COMMANDS
+*/*
+*/*
+*/* ----------------------- HELP COMMAND -----------------------------
+*/*
+*/* Command: ZRMS HELP
+*/*
+*/* Output:  Subsystem display commands:
+*/*           OPTIONS      - display initialization options
+*/*           STATUS       - display current subsystem status
+*/*           TRACE        - display trace data crumbs
+*/*          Subsystem action commands:
+*/*           TRACE=CLEAR  - clear trace data crumbs
+*/*           CMP=(YES|NO) - activate/deactivate message compression
+*/*           DMP=(YES|NO) - take/skip SVC dumps during ABEND recovery
+*/*           SMF=(nnn|NO) - specify record type; NO to stop recording
+*/*           TRC=(ON|OFF) - activate/deactivate trace
+*/*          END
+*/*
+*/* --------------------- DISPLAY COMMANDS ---------------------------
+*/*
+*/* Command: ZRMS STATUS
+*/*
+*/* Output:  Subsystem status ............. Active
+*/*           Residency ................... Dynamic-LPA
+*/*           Initialization .............. RMSINI
+*/*           ZSVT vector table ........... 02F2F828
+*/*           Security server class........ NONE
+*/*          SSI server ................... RMSSSI/15426000
+*/*           Command listener............. 00000037
+*/*           EOT listener ................ 00001787
+*/*           WTO listener ................ 00000807
+*/*           Allocation listener ......... 00000014
+*/*           Deallocation listener........ 00000014
+*/*          SVC monitor server ........... SVC=255/1542F83A
+*/*           Frontend .................... 00004478
+*/*           Backend ..................... 00004478
+*/*          Monitor log server ........... RMSLOG/1542FFA0
+*/*           Log records ................. 00006040
+*/*           SMF records ................. 00000002
+*/*          Monitored SVCs ............... 00008688
+*/*           PRB ......................... 00004478
+*/*           SVRB/TIRB/IRB ............... 00002752
+*/*           INIT(IEFIIC/IEFSD060) ....... 00001458
+*/*          END
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZRMS OPTIONS
+*/*
+*/*  Output: Subsystem initialization options
+*/*           CMP  = Yes
+*/*           CON  = No
+*/*           DMP  = N0
+*/*           TRC  = Off
+*/*           SMF  = 255
+*/*           SVC  = 255
+*/*           SAF  = NONE
+*/*          END
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZRMS TRACE
+*/*
+*/* Output:  Subsystem trace data crumbs
+*/*          STAB=7F569000 SVCE=7F569030 LGXE=008D5268
+*/*          SVX=7FF71728 SVXE=7FF71678 SPN=00000000 SVN=7F569250
+*/*           INI=A....F.H.JK.M.............0..3......$.. RMSINI
+*/*           CMD=..........................0.2.4..78.... RMSCMD
+*/*           EOT=ABCD...H.JK....PQR..................... RMSEOT
+*/*           WTO=ABCDEFGH..K............................ RMSWTO
+*/*           SSI=ABCDE.GHIJKLMNOPQRS.UVW...0..345.78.... RMSSSI
+*/*           SVS=AB...FGHIJ.......RST................... RMSSVC
+*/*           SVC=AB..EFGHIJKLM...QR..................... RMSSVC
+*/*           LOG=AB..EFGHIJKLMN...RS........12.4.6789..@ RMSLOG
+*/*           ALO=AB.DEF....K.......STUV...Z..........$#. RMSSSI
+*/*           UNL=AB..EF................................. RMSSSI
+*/*           PAR=ABCDEF...JKLM.OP.RS.......0...456...... RMSSSI
+*/*           SPN=..........................01.......9... RMSSSI
+*/*          END
+*/*
+*/* ---------------------- ACTION COMMANDS ---------------------------
+*/*
+*/* Command: ZRMS CMP=NO
+*/*
+*/*  Output:  ZRMS12I Subsysytem CMP option set to NO
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZRMS CMP=YES
+*/*
+*/*  Output:  ZRMS12I Subsysytem CMP option set to YES
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZRMS DMP=NO
+*/*
+*/*  Output:  ZRMS12I Subsysytem DMP option set to NO
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZRMS DMP=YES
+*/*
+*/*  Output:  ZRMS12I Subsysytem DMP option set to YES
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZRMS SMF=NO
+*/*
+*/*  Output:  ZRMS12I Subsysytem SMF option set to NO
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZRMS SMF=255
+*/*
+*/*  Output:  ZRMS12I Subsysytem SMF option set to 255
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZRMS TRC=ON
+*/*
+*/*  Output:  ZRMS12I Subsysytem TRC option set to ON
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZRMS TRC=OFF
+*/*
+*/*  Output:  ZRMS12I Subsysytem TRC option set to OFF
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZRMS TRACE=CLEAR
+*/*
+*/*  Output:  ZRMS16I Subsysytem trace data crumbs cleared
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Contact me:
+*/*  Feel free to contact me if you have questions.
+*/*
+*/*  Ben Marino
+*/*  Freelance zArchitect|zMentor|zInstructor
+*/*  719.271.1344
+*/*  b2marino@outlook.com
+*/*  linkedin.com/in/ben-marino-40887915
+*/*
+*/*
+*/*********************************************************************

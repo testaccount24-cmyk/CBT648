@@ -1,0 +1,296 @@
+*/*********************************************************************
+*/*
+*/*
+*/*                           ZRMS
+*/*                     RESOURCE MONITOR
+*/*                         SUBSYSTEM
+*/*
+*/* Resource Monitoring:
+*/*  The Resource Monitor Subsystem (ZRMS) allows you to monitor
+*/*  system resource usage. For example, you can use it to monitor
+*/*  common virtual storage usage by specific jobs, started task,
+*/*  and TSO users with minimal overhead. ZRMS gives you the choice
+*/*  of logging monitored data to sequential datasets, PDS members,
+*/*  and/or SMF records. You can use the monitored data to predict
+*/*  problems or constraints before they become critical.
+*/*
+*/*  The ZRMS subsystem supports the following monitor facilities:
+*/*
+*/*   - Virtual Storage Monitor Facility
+*/*   - Authorized Service Monitor Facility
+*/*   - General Resource Monitor Facility
+*/*
+*/* Virtual Storage Monitor Facility:
+*/*  The virtual storage monitor facility allows you to monitor
+*/*  the following virtual storage areas:
+*/*
+*/*  - E/SQA and E/CSA common virtual storage
+*/*  - E/LSQA address space virtual storage
+*/*  - Jobstep task address space virtual storage
+*/*  - E/PRIVATE address space virtual storage
+*/*
+*/* Authorized Service Monitor Facility:
+*/*  The authorized service monitor facility allows you to monitor
+*/*  authorized system resources. You can use it as follows:
+*/*
+*/*  - Monitor MODESET authorization service requests
+*/*  - Restrict MODESET authorization service requests
+*/*  - Monitor user-defined service requests
+*/*  - Restrict user-defined service requests
+*/*  - Monitor authorized system and subsystem commands
+*/*  - Restrict authorized system and subsystem commands
+*/*
+*/* General Resource Monitor Facility:
+*/*  The general resource monitor facility allows to monitor
+*/*  the following system resources:
+*/*
+*/*  - Security server (RACHECK, RACINIT, RACLIST, RACDEF)
+*/*  - Job management (ATTACH, DETACH)
+*/*  - Program management (LINK, LOAD, DELETE, IDENTIFY, XCTL)
+*/*  - Resource serialization (ENQ, DEQ, RESERVE)
+*/*  - Real storage management (PGSER, PGFIX, PGFREE, PGOUT)
+*/*  - System resource management (SYSEVENT)
+*/*  - Dynamic allocation/deallocation (DYNALLOC)
+*/*  - Data management (OPEN, CLOSE, BLDL, FIND, STOW)
+*/*  - Timer supervision (STIMER, STIMERM)
+*/*  - I/O management (EXCP, EXCPVR)
+*/*  - Wait and post management (WAIT, POST, EVENTS)
+*/*
+*/* Logging Monitored Resource Data:
+*/*  You have the option of logging monitored resource data
+*/*  as follows:
+*/*
+*/*  - Sequential datasets
+*/*  - PDS members
+*/*  - SMF
+*/*
+*/* ZRMS Subsystem Implementation:
+*/*  ZRMS exploits the SUBSYS DD facility of the MVS/SSI to allow
+*/*  you to define system resource monitoring.
+*/*
+*/*  When you code SUBSYS=ZRMS on DD statements, MVS components,
+*/*  route control, via the SSI, to the ZRMS subsystem. ZRMS takes
+*/*  advantage of the following DD processing phases to create the
+*/*  resource monitoring environment:
+*/*
+*/*  - Allocation
+*/*  - Open
+*/*  - Deallocation
+*/*  - Close
+*/*
+*/* SUBSYS=ZRMS DD Parameters:
+*/*  The ZRMS subsystem defines the following resource monitor
+*/*  parameters:
+*/*
+*/*  SUBSYS=(ZRMS,'DDname,
+*/*                RPT={S|D}
+*/*                SMF={Y|N}
+*/*                SVC={nnn,...|name,...}
+*/*                RES={nnn,...|name,...}
+*/*                SP={SQA|CSA|LSQA|JST|PVT|ALL|nnn')
+*/*
+*/*  ZRMS
+*/*   Specifies the ZRMS subsystem name.
+*/*
+*/*  DDname
+*/*   Specifies the monitor log DD name. The DD name can point to
+*/*   SYSOUT, sequential, or partitioned dataset member.
+*/*
+*/*  RPT={D|S}
+*/*   Specifies the monitor report type. "D" logs a detailed report.
+*/*   "S" logs a summary report. If not specified, the default "S".
+*/*
+*/*  SMF={N|Y}
+*/*   Specifies SMF recording option. "Y" logs monitor report to SMF.
+*/*   If not specified, the default is "N". When "Y" is specified,
+*/*   initialization option SMF=nnn must specify a user-defined SMF
+*/*   record number in the range of 200 to 255.
+*/*   Refer to SRCLIB($OPTIONS) member for implementation details.
+*/*
+*/*  SVC={nnn|name}
+*/*   Specifies which SVCs you wish to monitor. "nnn" allows you to
+*/*   monitor SVCs by number. "name" allows you to monitor SVCs by
+*/*   name. You can combine both SVC numbers and SVC names.
+*/*
+*/*  DIS={nnn|name}
+*/*   Specifies which SVCs you wish to restrict. "nnn" allows you to
+*/*   restrict SVCs by number. "name" allows you to restrict SVCs by
+*/*   name. You can combine both SVC numbers and SVC names.
+*/*
+*/*  SP={nnn,...|nnn:nnn|SQA|CSA|LSQA|PVT|JST|ALL}
+*/*   Specifies which storage subpools you wish to monitor.
+*/*   Note that the SP= parameter is only valid when specified in
+*/*   conjunction with GETMAIN/FREEMAIN SVCs.
+*/*
+*/*   {nnn,...}
+*/*   Allows you to specify the storage subpool by number. If you
+*/*   specify multiple subpools, separate them with commas.
+*/*
+*/*   SP=SQA
+*/*    Monitors E/SQA subppols 226,239,245,247,248.
+*/*
+*/*   SP=CSA
+*/*    Monitors E/CSA subpools 227,228,231,241.
+*/*
+*/*   SP=SQA,CSA
+*/*    Monitors E/SQA and E/CSA subpools.
+*/*
+*/*   SP=LSQA
+*/*    Monitors E/LSQA subpools 203-205,213-215,223-225,233-235,
+*/*    253-255.
+*/*
+*/*   SP=JST
+*/*    Monitors jobstep task subpools 129-132,226,244,249.
+*/*
+*/*   SP=PVT
+*/*    Monitors E/PRIVATE subpools 0-134,229,230,236,237,240-244,
+*/*    249-253.
+*/*
+*/*   SP=ALL
+*/*    Monitors subpools 0-255.
+*/*
+*/*
+*/* ZRMS Subsystem Monitor Examples:
+*/*
+*/*  EXAMPLE 1:
+*/*   Monitor GETMAIN/FREEMAIN requests issued for subpool SQA, CSA,
+*/*   and LSQA. Log monitor report to PDS member REPORT, of dataset
+*/*   MONITOR.SVC.REPORT.
+*/*
+*/*   //STEP1   EXEC PGM=MYPGM
+*/*   //MONITOR  DD  SUBSYS=(ZRMS,'MONLOG,SVC=GETMAIN,FREEMAIN',
+*/*   //             'SP=SQA,CSA,LSQA')
+*/*   //MONLOG   DD  DSN=MONITOR.SVC.REPORT(REPORT),DISP=SHR
+*/*
+*/*  EXAMPLE 2:
+*/*   Monitor GETMAIN/FREEMAIN requests issued for subpools 129, 130,
+*/*   131 132 by programs executing in STEP1. Monitor MODESET service
+*/*   requests issued by programs running in STEP2.
+*/*
+*/*   //STEP1   EXEC PGM=GLPGM21
+*/*   //STEP1LG  DD  SUBSYS=(ZRMS,'MONLOG,SVC=GETMAIN,FREEMAIN',
+*/*   //             SP=129,130,131,132')
+*/*   //MONLOG   DD  DSN=GLPGM21.GETMAIN.FREEMAIN.LOG,DISP=SHR
+*/*   //*
+*/*   //STEP2   EXEC PGM=GLPGM27
+*/*   //STEP2LG  DD  SUBSYS=(ZRMS,'MONLOG,SVC=MODESET')
+*/*   //MONLOG   DD  DSN=GLPGM27.MODESET.LOG,DISP=SHR
+*/*
+*/*  EXAMPLE 3:
+*/*   Monitor GETMAIN/FREEMAIN requests issued usig SVC numbers.
+*/*   log report to USERLOG SYSOUT dataset.
+*/*
+*/*   //STEPA   EXEC PGM=USERPGM
+*/*   //MONITOR  DD  SUBSYS=(ZRMS,'USERLOG,RPT=D,SVC=4,5,10,120')
+*/*   //USERLOG  DD  SYSOUT=*
+*/*
+*/*  EXAMPLE 4:
+*/*   Disallow the MODESET SVC issued by programs running on behalf
+*/*   of STEP1. When a disallowed SVC is issued, the jobstep task
+*/*   is obnormally terminated with user completion code 2023 and
+*/*   reason code 00000108.
+*/*
+*/*   //STEP1   EXEC PGM=YOURPGM
+*/*   //MONITOR  DD  SUBSYS=(ZRMS,'MONLOG,DIS=MODESET')
+*/*   //MONLOG   DD  DUMMY
+*/*
+*/*  EXAMPLE 5:
+*/*   Monitor program management supervisor services and log detail
+*/*   report to MONLOG SYSOUT dataset.
+*/*
+*/*   //STEP1   EXEC PGM=YOURPGM
+*/*   //MONITOR  DD  SUBSYS=(ZRMS,'PGMLOG,RPT=D',
+*/*                  SVC=LOAD,DELETE,LINK,XCTL,IDENTIFY')
+*/*   //PGMLOG   DD  SYSOUT=*
+*/*
+*/*  EXAMPLE 6:
+*/*   Monitor job management supervisor services and log summary
+*/*   report to MONLOG SYSOUT dataset.
+*/*
+*/*   //STEP1   EXEC PGM=YOURPGM
+*/*   //MONITOR  DD  SUBSYS=(ZRMS,'MONLOG,RPT=S,SVC=ATTACH,DETACH')
+*/*   //MONLOG   DD  SYSOUT=*
+*/*
+*/*  EXAMPLE 7:
+*/*   Monitor system and subsystem commands and log report to SMF
+*/*   record only.
+*/*
+*/*   //STEP1   EXEC PGM=YOURPGM
+*/*   //MONITOR  DD  SUBSYS=(ZRMS,'DUMMYLOG,SMF=Y,SVC=MGCR,MGCRE')
+*/*   //DUMMYLOG DD  DUMMY
+*/*
+*/*
+*/* ZRMS Subsystem Initialization:
+*/*  The ZRMS subsystem is initialized by the ZRMSINI service routine.
+*/*  The routine is given control in the Master Scheduler address space
+*/*  (MSTR). Initialization includes:
+*/*
+*/*  - ESQA-build ZRMS subsystem control table
+*/*  - Dynamic-LPA load service module ZRMSSRV
+*/*  - Build the ZRMS subsystem vector table
+*/*  - Activate the ZRMS subsystem
+*/*
+*/*
+*/* ZRMS Subsystem Initialization Parameters:
+*/*  CMP={NO|YES} Subsystem message compression option. CMP=NO does
+*/*               not compress ZRMS subsystem WTO message text.
+*/*               CMP=YES removes message text duplicate blanks.
+*/*               If not specified the default is CMP=YES.
+*/*
+*/*  CON={NO|YES} Specifies if the SETCON MN,JOBNAMES=(ON,LOG)
+*/*               command should be internally issued to allow the
+*/*               ZRMS subsystem to listen for issued monitored
+*/*               messages. If not specified the default is CON=YES.
+*/*
+*/*  DMP={NO|YES} Specifies if SVC dumps should be taken when
+*/*               abnormal ZRMS subsystem internal errors occur.
+*/*               If not specified, the default is DMP=NO.
+*/*
+*/*  SAF={class}  Specifies the security server class the ZRMS sub-
+*/*               system will use to make authorization checks.
+*/*               If not specified, external security is bypassed.
+*/*               Refer to SRCLIB($RACF) member for security server
+*/*               implementation details.
+*/*
+*/*  SMF={NO|nnn} Specifies a user-defined SMF record number in the
+*/*               range of 200 to 255. This parameter in conjuction
+*/*               with SMF={Y|N} option specified on SUBSYS DD=ZRMS,
+*/*               allows the ZRMS subsystem to log monitored data to
+*/*               SMF. If not specified the default is SMF=NO.
+*/*
+*/*               Refer to SRCLIB($MONITOR) member for a description
+*/*               of the SMF={Y|N} option.
+*/*
+*/*  SVC=nnn      Specifies the ZRMS subsystem SVC number to install.
+*/*               You MUST specifiy an available SVC number in the
+*/*               range of 200 to 255. DONOT specify an SVC number
+*/*               that is assigned to other OEM products or apps.
+*/*               If SVC= is not specified, ZRMS subsystem
+*/*               initialization fails.
+*/*
+*/*  TRC={ON|OFF} Specifies if internal ZRMS subsystem code debug
+*/*               tracing is ON or OFF. If not specified, the default
+*/*               is TRC=OFF.
+*/*
+*/*
+*/* ZRMS Subsystem External Security:
+*/*  When external security is activated by specifying initialization
+*/*  parameter SAF=$ZRMSCLS, users must have READ authority to the
+*/*  following profiles, in RACF class $ZRMSCLS:
+*/*
+*/*  MONITOR.ZRMS.CMD - Action commands profile
+*/*  MONITOR.ZRMS.JCL - SUBSYS DD JCL authorization profile
+*/*  Refer to SRCLIB($RACF) member for implementation details.
+*/*
+*/*
+*/* Contact Me:
+*/*  Feel free to contact me if you have questions.
+*/*
+*/*  Ben Marino
+*/*  Freelance zArchitect|zMentor|zInstructor
+*/*  719.271.1344
+*/*  b2marino@outlook.com
+*/*  linkedin.com/in/ben-marino-40887915
+*/*
+*/*
+*/*********************************************************************

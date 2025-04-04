@@ -1,0 +1,1470 @@
+RMSSVC   CSECT
+RMSSVC   AMODE 31
+RMSSVC   RMODE ANY
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        RMSSVC                                              */
+*/*                                                                  */
+*/* Function:    ZRMS subsystem SVC screening routine                */
+*/*                                                                  */
+*/* Description: Frontend and backend screening service routines.    */
+*/*                                                                  */
+*/* Enty Point:  SVCSVS                                              */
+*/*              Receives control as a type 3 SVC from the SVC       */
+*/*              FLIH to process screened SVC routines.              */
+*/*                                                                  */
+*/* Input GPRs:  R0  Parameter                                       */
+*/*              R1  Parameter                                       */
+*/*              R3  CVT   address                                   */
+*/*              R4  TCB   address                                   */
+*/*              R5  SVRB  address                                   */
+*/*              R6  Entry address                                   */
+*/*              R7  ASCB  address                                   */
+*/*              R14 Exit prolog address                             */
+*/*              R15 Parameter                                       */
+*/*                                                                  */
+*/* Input ARs:   AR0  Parameter                                      */
+*/*              AR1  Parameter                                      */
+*/*              AR15 Parameter                                      */
+*/*                                                                  */
+*/* GPRs Usage:  R3  CVT  address                                    */
+*/*              R4  TCB  address                                    */
+*/*              R5  SVRB address                                    */
+*/*              R6  Base address                                    */
+*/*              R7  RB   address                                    */
+*/*              R8  SVX  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R10 FRR  address                                    */
+*/*              R11 ZSVT address                                    */
+*/*                                                                  */
+*/* Output GPRs: R0  Parameter                                       */
+*/*              R1  Parameter                                       */
+*/*              R14 Return address                                  */
+*/*              R15 Parameter                                       */
+*/*                                                                  */
+*/* Output ARs:  AR0  Parameter                                      */
+*/*              AR1  Parameter                                      */
+*/*              AR15 Parameter                                      */
+*/*                                                                  */
+*/* Attributes:  TCB mode                                            */
+*/*              Primary mode                                        */
+*/*              Reentrant                                           */
+*/*              Caller key                                          */
+*/*              Caller state                                        */
+*/*              LOCAL lock held                                     */
+*/*              Page-fixed                                          */
+*/*              Write-protected                                     */
+*/*              Dynamic-LPA resident                                */
+*/*                                                                  */
+*/* Entry Point: SVCXIT                                              */
+*/*              Receives control as a type 3 SVC from the SVC       */
+*/*              FLIH to restore callers SVC screened environment.   */
+*/*                                                                  */
+*/* Input GPRs:  R0  Parameter                                       */
+*/*              R1  Parameter                                       */
+*/*              R3  CVT   address                                   */
+*/*              R4  TCB   address                                   */
+*/*              R5  SVRB  address                                   */
+*/*              R6  Entry address                                   */
+*/*              R7  ASCB  address                                   */
+*/*              R14 Exit prolog address                             */
+*/*              R15 Parameter                                       */
+*/*                                                                  */
+*/* Input ARs:   AR0  Parameter                                      */
+*/*              AR1  Parameter                                      */
+*/*              AR15 Parameter                                      */
+*/*                                                                  */
+*/* Output GPRs: R0  Parameter                                       */
+*/*              R1  Parameter                                       */
+*/*              R14 Return address                                  */
+*/*              R15 Parameter                                       */
+*/*                                                                  */
+*/* Output ARs:  AR0  Parameter                                      */
+*/*              AR1  Parameter                                      */
+*/*              AR15 Parameter                                      */
+*/*                                                                  */
+*/* Attributes:  TCB mode                                            */
+*/*              Primary mode                                        */
+*/*              Reentrant                                           */
+*/*              Caller key                                          */
+*/*              Caller state                                        */
+*/*              No locks held                                       */
+*/*              Page-fixed                                          */
+*/*              Write-protected                                     */
+*/*              Dynamic-LPA resident                                */
+*/*                                                                  */
+*/* Copyright:   Ben Marino. 2021 - 2023 (unpublished)               */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @01 | V1R1 | 09242022 | Ben Marino  | Initial version               *
+* @02 | V1R1 | 02042023 | Ben Marino  | Serviceability enhancements   *
+*     |      |          |             |                               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+SVCSVS   DS    0H
+         ENTRY SVCSVS
+         COPY  ZGBLS
+         USING PSA,0                   FLC
+         USING CVT,R3                  CVT
+         USING TCB,R4                  TCB
+         USING RBSECT,R5               SVRB
+         USING SVCSVS,R6               base
+         B     SVSMAIN
+         ZMACS GEN=MID,DSECT=NO
+*
+**       Deactivate SVC screening
+*
+SVSMAIN  DS    0H
+         NI    TCBFLGS7,XFF-TCBSVCS    turn screening off
+         NI    TCBFLGS7,XFF-TCBSVCSP   turn attach propagation off
+*
+**       Save caller parameter regs
+*
+         LA    R12,RBEXSAVE            XSA address
+         USING XSA,R12
+         STAM  R14,R1,XSAARS           save parm ARs
+         STMG  R14,R1,XSAGPRS          save parm GPRs
+         XR    R7,R7                   redundant scrub
+         ICM   R7,7,RBLINKB            caller RB
+RB       USING RBSECT,R7
+*
+**       Storage obtain SVX entry
+*
+         XR    R8,R8                   SVX not available
+         XR    R10,R10                 FRR not available
+         XR    R11,R11                 ZSVT not available
+         STORAGE OBTAIN,COND=NO,                                       +
+               SP=255,LOC=ANY,LENGTH=SVX@SIZE,LINKAGE=SYSTEM
+         LR    R8,R1                   SVX
+         USING SVX,R8
+         LR    R0,R1                   copy address
+         LA    R1,SVX@SIZE             SVX size
+         XR    R15,R15                 zero
+         MVCL  R0,R14                  scrub SVX
+         MVC   SVXID,=CL4'SVX'         ID
+         MVC   SVXFLGS,IDFLGS
+         MVC   SVXCID,IDCPSW
+         ST    R4,SVXTCBA              init TCB
+         ST    R5,SVXSVRB              init SVRB
+         ST    R7,SVXRBA               init caller RB
+         ST    R8,SVXSVXA              init SVX
+         MVC   SVXRC,=AL4(RC8)         init RC
+         MVC   SVXSIZE,=AL4(SVX@SIZE)  init SVX size
+         LA    R13,SVXSAVE             savearea
+*
+**       Relocate PSW & parm regs
+*
+         MVC   SVXIARS,XSAARS          save parm ARs
+         MVC   SVXIREGS,XSAGPRS        copy parm GPRs
+         LR    R2,R7                   copy caller RB
+         SL    R2,ZRBPRFXL             RB prefix
+PREFIX   USING RBPRFXST,R2
+         LH    R1,PREFIX.RBINTCOD      SVC number
+         STC   R1,SVXSVCNM             init SVC number
+         L     R2,PREFIX.RBXSB         caller XSB
+         ST    R2,SVXXSBA              XSB address
+         USING XSB,R2
+         MVC   SVXCPSW,RB.RBOPSW       RBOPSW
+         MVC   SVXCFPSW,XSBOPSW16      PSW16 analog
+         MVC   SVXC8PSW,XSB_ORIG_RBOPSW PSW8 analog
+         DROP  R2
+*
+**       Check caller environment
+*
+         LA    R2,SVXCFPSW             PSW16 analog
+         USING PSWE,R2
+         ICM   R2,15,PSWEIABYT03       AMODE=64 caller
+         BZ    SVS0010                 no
+         DROP  R2
+         MVC   SVXRSN,=AL4(RSN140)     RSN
+         ZWTO  MID=ZRMS70E,ZSVT=READONLY,PLIST=SVXPLIST,               +
+               V1==CL8'AMODE-64',V2=SVXRC,V3=SVXRSN
+         ZCALL SR=BACKUP2,RETURN=NO    quit                        @02A
+*
+**       Extact caller program name
+*
+SVS0010  DS    0H
+         XR    R2,R2
+         ICM   R2,7,RB.RBCDE1          CDE address init?
+         BZ    SVS0015                 no
+         USING CDENTRY,R2
+         MVC   SVXPGMNM,CDNAME         copy program name
+         DROP  R2
+*
+**       Identify caller environment
+*
+SVS0015  DS    0H
+         CLI   RB.RBSTAB1,RBFTPRB      RB caller?
+         BE    SVS0020                 yes
+         OI    SVXFLG3,SVX@SVRB        SVRB, TIRB,IRB caller
+*
+**       Locate SVC table entry
+*
+SVS0020  DS    0H
+         L     R3,CVTABEND             SCVT
+         USING SCVTSECT,R3
+         L     R3,SCVTSVCT             SVC table
+         XR    R2,R2
+         IC    R2,SVXSVCNM             SVC number
+         SLL   R2,3                    multiply by 8
+         LA    R3,0(R2,R3)             SVCENTRY
+         USING SVCENTRY,R3
+         MVC   SVXSVCEN,SVCENTRY       copy SVC entry
+         TM    SVCTP,SVCTP6            T6 SVC?
+         BZ    SVS0025                 no
+         OI    SVXFLG3,SVX@TYP6        yes
+         DROP  R3
+*
+**       Establish FRR recovery
+*
+SVS0025  DS    0H
+         L     R3,RMSFRRA              FRR
+         BSM   R3,0                    AMODE
+         SETFRR A,FRRAD=(R3),MODE=FULLXM,PARMAD=(R10),                 +
+               WRKREGS=(R14,R15)
+         USING FRR,R10
+         ST    R10,SVXFRRA             FRR workarea
+         XC    FRR(FRR@SIZE),FRR
+         MVC   FRRID,=CL3'FRR'         ID
+         ST    R12,FRRXSA              XSA address
+         ST    R8,FRRPARM              SVX address
+         LA    R3,SVXRTRG              retry regs address
+         ST    R3,FRRSAVE              FRR restores retry regs
+         STM   R0,R15,SVXRTRG          init retry regs
+         LA    R3,SVS0900              retry address
+         BSM   R3,0                    set AMODE
+         ST    R3,FRRRETRY             activate retry
+         OI    SVXFLG1,SVX@ZFRR        FRR established indicator
+*
+**       Validity check environment
+*
+         L     R9,TCBSVCA2             SVCE
+         USING SVCE,R9
+         MVC   SVXMSGV1,=CL8'SVCE'     msgID variable data
+         CLC   SVCEID,=CL4'SVCE'       SVCE?
+         BNE   SVS0030                 no
+         ST    R9,SVXSVCEA             init SVCE address
+         ST    R8,SVCESVXA             SVX - debugging
+         OI    SVXFLG1,SVX@SVCE        SVCE is valid
+         L     R11,SVCESVTA            ZSVT
+         USING ZSVT,R11
+         MVC   SVXMSGV1,=CL8'ZSVT'     msgID variable data
+         CLC   ZSVTID,=CL4'ZSVT'       ZSVT?
+         BNE   SVS0030                 no
+         ST    R8,ZSVTSVXA             SVX - debugging
+         OI    SVXFLG1,SVX@ZSVT        ZSVT is valid
+         MVC   ZTRCVSTR,ZSVTDOTS       clear trace data crumbs
+         STM   R0,R15,SVXRTRG          update retry regs           @02A
+         B     SVS0035                 carry on
+*
+SVS0030  DS    0H
+         MVC   SVXRSN,=AL4(RSN144)     RSN
+         ZWTO  MID=ZRMS71E,ZSVT=READONLY,PLIST=SVXPLIST,               +
+               V1=SVXMSGV1,V2=SVXRC,V3=SVXRSN
+         ZCALL SR=BACKUP2,RETURN=NO    quit                        @02A
+*
+SVS0035  DS    0H
+         CLI   SVXSVCNM,ATCHSVC        ATTACH issued?
+         BNE   SVS0040                 no
+         OI    SVXFLG3,SVX@ATTC        set ATTACH indicator
+*
+**       Update front-end entry count
+*
+SVS0040  DS    0H
+         L     R14,ZSVTSVSC            entry count
+         LA    R15,1(,R14)             add one
+         CS    R14,R15,ZSVTSVSC        update count
+         BNE   SVS0040                 changed: try again
+         TM    SVXFLG3,SVX@SVRB        SVC issued by SVRB caller?
+         BZ    SVS0050                 no
+*
+**       Update SVRB issued SVC count
+*
+SVS0045  DS    0H
+         L     R14,ZSVTSVRB            entry count
+         LA    R15,1(,R14)             add one
+         CS    R14,R15,ZSVTSVRB        update count
+         BNE   SVS0045                 changed: try again
+         ZTRCE SVS=A,LINKAGE=LOCAL     trace
+*
+**       Update PRB issued SVC count
+*
+SVS0050  DS    0H
+         L     R14,ZSVTRBCT            entry count
+         LA    R15,1(,R14)             add one
+         CS    R14,R15,ZSVTRBCT        update count
+         BNE   SVS0050                 changed: try again
+         ZTRCE SVS=B,LINKAGE=LOCAL     trace
+*
+SVS0060  DS    0H
+         CLC   SVCESTCB,PSATOLD        INITiator TCB?
+         BNE   SVS0080                 no, skip count update
+         OI    SVXFLG3,SVX@60CT        yes
+         ZTRCE SVS=C,LINKAGE=LOCAL     trace
+*
+**       Update INIT issued SVC count
+*
+SVS0070  DS    0H
+         L     R14,ZSVT60CT            INITiator count
+         LA    R15,1(,R14)             add one
+         CS    R14,R15,ZSVT60CT        update count
+         BNE   SVS0070                 changed: try again
+         ZTRCE SVS=D,LINKAGE=LOCAL     trace
+*
+**       Set SVC issuer authorization
+*
+SVS0080  DS    0H
+         CLC   SVCESTCB,PSATOLD        INITiator TCB?
+         BE    SVS0090                 yes, allow SVC
+         TM    SVCEFLG2,SVCE@DIS       disallow SVC?
+         BZ    SVS0090                 no
+         OI    SVXFLG1,SVX@SUNA        unauthorized SVC caller
+         ZTRCE SVS=E,LINKAGE=LOCAL     trace
+         B     SVS0900                 fail request
+*
+**       Build backend PSWhook
+*
+SVS0090  DS    0H
+         ZCALL SR=PSWHOOK              PSWhook
+         OI    SVXFLG1,SVX@UPDT        PSW updated indicator
+         ZTRCE SVS=F,LINKAGE=LOCAL     trace
+*
+**       Recovery retry routine
+*
+SVS0900  DS    0H
+         TM    FRRFLG1,FRR@RTRY        did we ABEND?
+         BZ    SVS0910                 no
+         OI    SVXFLG1,SVX@QUIT        quit screening
+*
+**       Delete FRR recovery
+*
+SVS0910  DS    0H
+         SETFRR D,WRKREGS=(R14,R15)    delete FRR
+         NI    SVXFLG1,XFF-SVX@ZFRR    FRR deleted
+         ZTRCE SVS=G,LINKAGE=LOCAL     trace
+*
+**       Release LOCAL lock
+*
+         SETLOCK RELEASE,TYPE=LOCAL,REGS=SAVE,                         +
+               RELATED=('Unserialize local supervisor')
+         ZTRCE SVS=H,LINKAGE=LOCAL     trace
+*
+**       Log SVC entry data record
+*
+         TM    SVXFLG1,SVX@SUNA        authorized SVC caller?
+         BNZ   SVSABEND                no, ABEND
+         TM    SVXFLG1,SVX@QUIT        quit?
+         BNZ   SVS0999                 yes
+         CLC   SVCESTCB,PSATOLD        INITiator TCB?
+         BE    SVS0920                 yes
+         ZTRCE SVS=I,LINKAGE=LOCAL     trace
+*
+**       Log SVC entry environmebt
+*
+         LR    R1,R8                   SVX address
+         MVC   SVXSRID,=CL3'&LOGINI'   INIT log request
+         ZCALL EP=RMSLOG               RMSLOG processor
+         ZTRCE SVS=J,LINKAGE=LOCAL     trace
+*
+**       Return to exit prolog
+*
+SVS0920  DS    0H
+         LMG   R14,R1,XSAGPRS          reload GPRs
+         LAM   AR14,AR1,XSAARS         reload ARs
+         BR    R14                     return to exit prolog
+*
+**       Backup caller PSW to reissue SVC
+*
+SVS0999  DS    0H
+         ZTRCE SVS=L,LINKAGE=LOCAL     trace
+         MVC   SVXRSN,=AL4(RSN148)     RSN
+         ZWTO  MID=ZRMS71E,ZSVT=READONLY,PLIST=SVXPLIST,               +
+               V1==CL8'ABEND',V2=SVXRC,V3=SVXRSN
+         ZCALL SR=BACKUP2,RETURN=NO    quit                        @02A
+*
+**       ABEND exit
+*
+SVSABEND DS    0H
+         XR    R1,R1
+         IC    R1,SVXSVCNM             SVC number
+         ST    R1,SVXWORD
+         CLI   SVXSVCNM,35             WTO SVC=35?
+         BE    SVSABN99                yes, skip WTO
+         TM    SVXFLG1,SVX@ZSVT        ZSVT available?
+         BZ    SVSABN99                no, skip WTO
+         L     R3,=V(SVCNTAB)          SVCNTAB table
+         USING SVNX,R3                 SVNX table entry
+         L     R1,SVXWORD              SVC number
+         SLL   R1,5                    multiply by 32
+         LA    R3,0(R1,R3)             macro name entry
+         ZWTO  MID=ZRMS95E,                                            +
+               V1=SVXWORD,V2=SVNXNAME,PLIST=SVXPLIST
+*
+SVSABN99 DS    0H
+         L     R2,=AL4(RSN108)         RSN
+         ABEND &UCODE,DUMP,REASON=(R2) ABEND
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+RMSFRRA  DC    V(RMSFRR)               FRR routine
+ZRBPRFXL DC    AL4(RBPRFLNA)           RB prefix length
+         DS    0C
+IDCPSW   DC    CL4'CPSW'               debugging ID
+IDFLGS   DC    CL4'FLGS'               debugging ID
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        BACKUP2                                             */
+*/*                                                                  */
+*/* Function:    Backup caller PSW two bytes routine                 */
+*/*                                                                  */
+*/* Description: Point caller PSW to issued SVC                      */
+*/*                                                                  */
+*/* Input Regs:  R4  TCB   address                                   */
+*/*              R5  SVRB  address                                   */
+*/*              R7  RB    address                                   */
+*/*              R8  SVX   address                                   */
+*/*              R10 FRR   address                                   */
+*/*              R12 XSA   address                                   */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs usage:  R4  PSW   address                                   */
+*/*              R5  RB    address                                   */
+*/*              R6  XSB   address                                   */
+*/*              R7  PSWE  address                                   */
+*/*              R8  SVX   address                                   */
+*/*              R10 Base  address                                   */
+*/*              R12 XSA   address                                   */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Warning:     Routine runs without a savearea                     */
+*/*                                                                  */
+*/********************************************************************/
+BACKUP2  DS    0H
+         ENTRY BACKUP2
+         USING SVX,R8
+         USING ZSVT,R11
+         USING XSA,R12
+         B     12(,R15)
+         DC    CL8'BACKUP2'            ID
+*
+BACK000  DS    0H
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15
+         USING BACKUP2,R10             base
+         LA    R1,SVXGENS              savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         OI    SVXFLG1,SVX@BKP2        set indicator
+*
+**       Backup RBOPSW 2-bytes
+*
+         L     R5,SVXRBA               caller RB
+         USING RBSECT,R5
+         LA    R4,RBOPSW               caller PSW
+         USING PSW,R4
+         TM    PSWIA,PSWAMODE31        AMODE=31?
+         BZ    BACK010                 no
+         OI    SVXFLG4,SVX@AM31        yes
+*
+BACK010  DS    0H
+         L     R2,PSWIA                NSI
+         LA    R2,0(,R2)               purify NSI
+         SL    R2,PSWDELTA             subtract 2-bytes
+         ST    R2,RBOPSWA              update NSI
+         TM    SVXFLG4,SVX@AM31        AMODE=31?
+         BZ    BACK020                 no
+         OI    RBOPSWA,RBOPSW31        yes
+*
+**       Backup XSBORPSW analog 2-bytes
+*
+BACK020  DS    0H
+         L     R6,SVXXSBA              XSB
+         USING XSB,R6
+         MVC   XSB_ORIG_RBOPSW,RBOPSW  update PSW analog
+*
+**       Backup XSBOPS16 analog 2-bytes
+*
+         LA    R7,XSBOPSW16            PSWE analog
+         USING PSWE,R7
+         MVC   PSWEIABYT47,RBOPSWA     update PSW analog
+         NI    PSWEIABYT47,PSWAMODE31  zero AMODE
+*
+**       Copy backup PSW to SVXE entry
+*
+         ICM   R2,15,SVXSVXEA          SVXE init?
+         BZ    BACK030                 no
+         USING SVXE,R2
+         MVC   SVXEBRPW,RBOPSW         RBOPW
+         MVC   SVXEB8PW,RBOPSW         PSW8 analog
+         MVC   SVXEBFPW,PSWE           PSW16 analog
+         DROP  R2
+*
+**       Delete FRR recovery
+*
+BACK030  DS    0H
+         TM    SVXFLG1,SVX@ZFRR        FRR established?
+         BZ    BACK099                 no
+         ICM   R3,15,SVXFRRA           FRR workarea?
+         BZ    BACK099                 no
+         XC    SVXFRRA,SVXFRRA         FRR deleted
+         SETFRR D,WRKREGS=(R14,R15)    delete FRR
+         NI    SVXFLG1,XFF-SVX@ZFRR    FRR deleted
+*
+**       Release LOCAL lock
+*
+BACK099  DS    0H
+         SETLOCK RELEASE,TYPE=LOCAL,REGS=USE,                          +
+               RELATED=('Unserialize local supervisor')
+*
+**       Storage release SVX
+*
+         L     R0,SVXSIZE              SVX size
+         STORAGE RELEASE,COND=NO,                                      +
+               ADDR=(R8),LENGTH=(R0),SP=255,LINKAGE=SYSTEM
+*
+**       Return to exit prolog
+*
+BACKXIT  DS    0H
+         LMG   R14,R1,XSAGPRS          reload GPRs
+         LAM   AR14,AR1,XSAARS         reload ARs
+         BR    R14                     return to exit prolog
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+PSWDELTA DC    F'2'                    RBOPSW delta
+URBPRFXL DC    AL4(RBPRFLNA)           RB prefix length
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        PSWHOOK                                             */
+*/*                                                                  */
+*/* Function:    Install SVC PSWhook backend routine.                */
+*/*                                                                  */
+*/* Description: Change caller PSW to point to PSWhook backend.      */
+*/*                                                                  */
+*/* Input Regs:  R7  RB   address                                    */
+*/*              R8  SVX  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 XSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs usage:  R5  SVXE address                                    */
+*/*              R6  XSB  address                                    */
+*/*              R7  RB   address                                    */
+*/*              R8  SVX  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 XSA  address                                    */
+*/*              R13 Savearea addess                                 */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/********************************************************************/
+PSWHOOK  DS    0H
+         ENTRY PSWHOOK
+         USING SVX,R8
+         USING SVCE,R9
+         USING ZSVT,R11
+         USING XSA,R12
+         B     12(,R15)
+         DC    CL8'PSWHOOK'            ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15
+         USING PSWHOOK,R10             base
+         LA    R1,SVXSVSA
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+*
+**       Check caller residency mode
+*
+         L     R7,SVXRBA               caller RB
+         USING RBSECT,R7
+         LA    R3,RBOPSW               caller PSW
+         USING PSW,R3
+         CLI   PSWIA,X'00'             24-bit caller?
+         BE    PSWH000                 yes
+         CLI   PSWIA,X'80'             24-bit caller?
+         BNE   PSWH010                 no
+         ZTRCE SVS=O,LINKAGE=LOCAL     trace
+         DROP  R3
+*
+**       Storage obtain 24-bit PSWhook
+*
+PSWH000  DS    0H
+         STORAGE OBTAIN,COND=YES,BNDRY=PAGE,                           +
+               SP=255,LOC=24,LENGTH=SVXE@SZE,LINKAGE=SYSTEM
+         LTR   R15,R15                 successful?
+         BZ    PSWH020                 yes
+         ZTRCE SVS=P,LINKAGE=LOCAL     trace
+         MVC   SVXRSN,=AL4(RSN152)     RSN
+         ZWTO  MID=ZRMS71E,ZSVT=READONLY,PLIST=SVXPLIST,               +
+               V1==CL8'SVXE-24',V2=SVXRC,V3=SVXRSN
+         ZCALL SR=BACKUP2,RETURN=NO    no, quit                    @02A
+*
+**       Storage obtain 31-bit PSWhook
+*
+PSWH010  DS    0H
+         STORAGE OBTAIN,COND=YES,BNDRY=PAGE,                           +
+               SP=255,LOC=31,LENGTH=SVXE@SZE,LINKAGE=SYSTEM
+         LTR   R15,R15                 successful?
+         BZ    PSWH020                 yes
+         ZTRCE SVS=Q,LINKAGE=LOCAL     trace
+         MVC   SVXRSN,=AL4(RSN156)     RSN
+         ZWTO  MID=ZRMS71E,ZSVT=READONLY,PLIST=SVXPLIST,               +
+               V1==CL8'SVXE-31',V2=SVXRC,V3=SVXRSN
+         ZCALL SR=BACKUP2,RETURN=NO    no, quit                    @02A
+*
+PSWH020  DS    0H
+         LR    R5,R1                   SVXE
+         USING SVXE,R5
+         XC    SVXE(SVXE@SZE),SVXE     scrub SVXE
+         ST    R5,SVXSVXEA             SVXE address
+         ST    R5,ZSVTSVXE             SVXE - debugging
+         ST    R8,SVXESVXA             SVX  address
+         ST    R9,SVXESVCE             SVCE address
+         ST    R11,SVXEZSVT            ZSVT address
+         MVC   SVXEID,=CL4'SVXE'       ID
+         MVI   SVXESVCI,X'&SVCID'      SVC OPcode
+         MVC   SVXESVCN,SVXSVCNM       caller SVC number
+         MVI   SVXESVCX,X'&SVCID'      SVC OPcode
+         MVC   SVXEZRMS,ZSVTSVCN       server SVC number
+         MVC   SVXEIDC,IDCALL          ID
+         MVC   SVXEIDH,IDHOOK          ID
+         MVC   SVXEIDB,IDBACK          ID
+         MVC   SVXEFCID,=XL2'&FCID'    FCID
+         MVC   SVXEXCID,=XL2'&XCID'    XCID
+         MVC   SVXESIZE,=AL4(SVXE@SZE) SVXE size
+*
+**       Copy PSW to SVXE entry
+*
+         MVC   SVXERPSW,SVXCPSW        RBOPW
+         MVC   SVXE8PSW,SVXC8PSW       PSW8 analog
+         MVC   SVXEFPSW,SVXCFPSW       PSW16 analog
+*
+**       Copy PSWhook to SVXE entry
+*
+         MVC   SVXEHRPW,SVXCPSW        RBOPSW PSW
+         MVC   SVXEH8PW,SVXC8PSW       PSW8 analog
+         MVC   SVXEHFPW,SVXCFPSW       PSW16 analog
+*
+**       Build RBOPSW PSWhook
+*
+         LA    R3,SVXEHRPW             PSWhook PSW address
+         USING PSW,R3
+         LA    R2,SVXEHOOK             PSWhook address
+         ST    R2,PSWIA                copy it to PSW address
+         TM    SVXCPSW4,PSWAMODE31     AMODE=31 caller?
+         BZ    PSWH030                 no
+         OI    PSWIA,PSWAMODE31        yes
+         ZTRCE SVS=R,LINKAGE=LOCAL     trace
+*
+**       Build PSWhook analog
+*
+PSWH030  DS    0H
+         MVC   SVXEH8PW,SVXEHRPW       PSW8 analog
+         LA    R4,SVXEHFPW             PSW16
+         USING PSWE,R4
+         MVC   PSWEIABYT47,PSWIA       PSWIA address
+         NI    PSWEIABYT47,XFF-PSWEAMODE31 AMODE=31 bit off
+         NI    PSWEBYTE1,XFF-PSWEECMOD EC mode bit off
+         TM    SVXCPSW4,PSWEAMODE31    AMODE=31 caller?
+         BZ    PSWH040                 no
+         OI    PSWEBYT47,PSWEAMODE31   yes
+         ZTRCE SVS=S,LINKAGE=LOCAL     trace
+*
+**       Set PSW to PSWhook code
+*
+PSWH040  DS    0H
+         L     R6,SVXXSBA              XSB
+         USING XSB,R6
+         MVC   RBOPSW,SVXEHRPW         update RBOPSW
+         MVC   XSBOPSW16,SVXEHFPW      update dispatcher PSW
+         MVC   XSB_ORIG_RBOPSW,RBOPSW  update original PSW
+         ZTRCE SVS=T,LINKAGE=LOCAL     trace
+*
+**       Routine Exit
+*
+PSWHEXIT DS    0H
+         L     R13,GPR@BWD(,R13)       mainline save area
+         LM    R14,R12,GPR@R14(R13)    restore mainline regs
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+XRBPRFXL DC    AL4(RBPRFLNA)           RB prefix length
+         DS    0C
+IDCALL   DC    CL16'SVC-CALL-ANALOGS'  SVC caller ID
+IDHOOK   DC    CL16'SVC-HOOK-ANALOGS'  PSWhook ID
+IDBACK   DC    CL16'SVC-BACK-ANALOGS'  BACKUP PSW ID
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        SVCXIT                                              */
+*/*                                                                  */
+*/* Function:    Audit Server backend SVC screening routine.         */
+*/*                                                                  */
+*/* Description: Receives control as a type 3 SVC from the SVC       */
+*/*              FLIH to restore the SVC caller environment.         */
+*/*                                                                  */
+*/* Input GPRs:  R0  Parameter                                       */
+*/*              R1  Parameter                                       */
+*/*              R3  CVT   address                                   */
+*/*              R4  TCB   address                                   */
+*/*              R5  SVRB  address                                   */
+*/*              R6  Entry address                                   */
+*/*              R7  ASCB  address                                   */
+*/*              R14 Exit prolog address                             */
+*/*              R15 Parameter                                       */
+*/*                                                                  */
+*/* Input ARs:   AR0  Parameter                                      */
+*/*              AR1  Parameter                                      */
+*/*              AR15 Parameter                                      */
+*/*                                                                  */
+*/* GPRs Usage:  R4  TCB  address                                    */
+*/*              R5  SVRB address                                    */
+*/*              R6  ZSVT address                                    */
+*/*              R7  FRR  address                                    */
+*/*              R8  SVX  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R10 Base address                                    */
+*/*                                                                  */
+*/* Output GPRs: R0  Parameter                                       */
+*/*              R1  Parameter                                       */
+*/*              R14 Return address                                  */
+*/*              R15 Parameter                                       */
+*/*                                                                  */
+*/* Output ARs:  AR0  Parameter                                      */
+*/*              AR1  Parameter                                      */
+*/*              AR15 Parameter                                      */
+*/*                                                                  */
+*/* Attributes:  TCB mode                                            */
+*/*              Primary mode                                        */
+*/*              Reentrant                                           */
+*/*              Caller key                                          */
+*/*              Caller state                                        */
+*/*              No locks held                                       */
+*/*              Page-fixed                                          */
+*/*              Write-protected                                     */
+*/*              Dynamic-LPA resident                                */
+*/*                                                                  */
+*/********************************************************************/
+SVCXIT   DS    0H
+         ENTRY SVCXIT
+         BASR  R10,0                   entry
+         USING *,R10
+         B     SVC0000
+         DC    CL8'SVCXIT'             ID
+*
+**       Save parameter registers
+*
+SVC0000  DS    0H
+         USING PSA,0
+         USING RBSECT,R5
+         LA    R12,RBEXSAVE            ZSA address
+         USING ZSA,R12
+         XC    ZSA(ZSA@SIZE),ZSA       scrub ZSA
+         STM   R14,R1,ZSASAVE          save low regs
+         STMH  R14,R1,ZSAHSAVE         save high regs
+         EAR   R6,AR0                  copy AR0 in R6
+         EAR   R7,AR1                  copy AR1 in R7
+         EAR   R8,AR14                 copy AR14 in R8
+         EAR   R9,AR15                 copy AR15 in R9
+*
+**       Validity check environment
+*
+         XR    R3,R3
+         ICM   R3,7,RBLINKB            caller RB
+ZPRB     USING RBSECT,R3
+         LA    R3,ZPRB.RBOPSW          caller PSW
+         USING PSW,R3
+         L     R3,PSWIA                NSI
+         LA    R3,0(,R3)               purify
+         LR    R15,R3                  protect
+         SL    R3,SVXEPFIX             SVXE prefix
+         USING SVXE,R3
+*
+         L     R2,=AL4(RSN176)         RSN
+         CLC   SVXEID,=CL4'SVXE'       SVXE?
+         BNE   SVC0010                 no
+*
+         L     R2,=AL4(RSN180)         RSN
+         CLI   SVXESVCI,X'&SVCID'      SVC OPcode?
+         BNE   SVC0010                 no
+*
+         L     R2,=AL4(RSN184)         RSN
+         CLC   SVXEFCID,=XL2'&FCID'    FCID?
+         BNE   SVC0010                 no
+*
+         L     R2,=AL4(RSN188)         RSN
+         CLC   SVXEXCID,=XL2'&XCID'    XCID?
+         BNE   SVCABEND                no
+*
+         OI    ZSAFLG2,ZSA@SCRN        yes
+         B     SVC0020                 carry on
+         DROP  R3
+*
+SVC0010  DS    0H
+         LR    R3,R15                  NSI
+         USING ZTRCE,R3
+         CLC   ZTRCETRC,=XL2'&ZTRC'    ZTRCE server call?
+         BNE   SVCABEND                no
+         CLC   ZTRCEDED,=XL2'&DEAD'    ZTRCE server call?
+         BNE   SVCABEND                no
+         OI    ZSAFLG2,ZSA@TRCE        yes
+         DROP  R3
+*
+**       Extract caller issued SVC
+*
+SVC0020  DS    0H
+         SL    R3,ZDELTA               issued SVC
+         XR    R2,R2
+         IC    R2,1(,R3)               SVC number
+         STC   R2,ZSASVCN              save it
+         L     R3,FLCCVT               CVT address
+         USING CVT,R3
+         L     R3,CVTABEND             SCVT
+         USING SCVTSECT,R3
+         L     R3,SCVTSVCT             SVC table origin
+         SLL   R2,3                    multiply by 8
+         LA    R3,0(R2,R3)             SVC entry address
+         USING SVCENTRY,R3
+         TM    SVCTP,SVCTP6            T6 SVC?
+         BZ    SVC0025                 no
+         OI    ZSAFLG1,ZSA@TYP6        yes
+         DROP  R3
+*
+**       Storage obtain DSA
+*
+SVC0025  DS    0H
+         STORAGE OBTAIN,COND=NO,SP=255,                                +
+               LENGTH=DSA@SIZE,LOC=ANY,LINKAGE=SYSTEM
+         LR    R11,R1
+         USING DSA,R11
+         LA    R13,DSASAVE
+         LR    R0,R1
+         XR    R15,R15
+         LA    R1,DSA@SIZE             DSA size
+         MVCL  R0,R14                  scrub it
+         ST    R2,DSASVCN              save SVC number
+         ST    R5,DSASVRB              save SVRB address
+         STM   R6,R9,DSAARS            save ARs
+         OI    ZSAFLG2,ZSA@DSAI        set debug indicator
+*
+**       Call server trace function
+*
+         TM    ZSAFLG2,ZSA@TRCE        trace call?
+         BNZ   SVCTRCE                 yes
+*
+**       Validity check screening call
+*
+         USING TCB,R4
+         ICM   R1,15,TCBSVCA2          SVCE init?
+         BNZ   SVC0035                 yes
+         L     R2,=AL4(RSN172)         set RSN
+         NI    ZSAFLG1,XFF-ZSA@SVCS    set inactive indicator
+         B     SVCABEND                ABEND
+*
+**       Obtain LOCAL lock
+*
+SVC0035  DS    0H
+         SETLOCK OBTAIN,TYPE=LOCAL,                                    +
+               MODE=UNCOND,REGS=SAVE,                                  +
+               RELATED=('Serialize local supervisor')
+*
+**       Establish FRR recovery
+*
+         L     R3,RMSFRRX              RMSFRR
+         BSM   R3,0                    set AMODE
+         SETFRR A,FRRAD=(R3),MODE=FULLXM,PARMAD=(R7),                  +
+               WRKREGS=(R14,R15)
+         USING FRR,R7
+         XC    FRR(FRR@SIZE),FRR
+         MVC   FRRID,=CL3'FRR'         ID
+         ST    R11,FRRPARM             DSA address
+         ST    R12,FRRZSA              ZSA address
+         LA    R3,SVC0055              retry address
+         BSM   R3,0                    set AMODE
+         ST    R3,FRRRETRY             activate retry
+         LA    R3,DSARGPRS             retry regs address
+         ST    R3,FRRSAVE              retry regs address
+         STM   R0,R15,DSARGPRS         save retry regs
+         OI    ZSAFLG2,ZSA@FRRS        set debug indicator
+*
+**       Validity check SVCE table
+*
+         L     R9,TCBSVCA2             SVCE address
+         USING SVCE,R9
+         CLC   SVCEID,=CL4'SVCE'       valid indeed?
+         BE    SVC0040                 yes
+         MVC   DSARSN,=AL4(RSN28)      set RSN
+         B     SVC0055
+*
+**       Validity check ZSVT table
+*
+SVC0040  DS    0H
+         OI    ZSAFLG1,ZSA@SVCE        tutto bene
+         ST    R9,DSASVCEA             save SVCE address
+         L     R6,SVCESVTA             ZSVT address
+         USING ZSVT,R6
+         CLC   ZSVTID,=CL4'ZSVT'       valid indeed?
+         BE    SVC0045                 yes
+         XR    R6,R6                   ZSVT not available
+         MVC   DSARSN,=AL4(RSN32)      set RSN
+         B     SVC0055
+*
+**       Identify SVC request caller
+*
+SVC0045  DS    0H
+         OI    ZSAFLG1,ZSA@ZSVT        ZSVT is valid
+         MVC   ZTRCSVTR,ZSVTDOTS       clear trace data crumbs
+         XR    R2,R2                   zero
+         ICM   R2,7,RBLINKB            SVC caller RB
+XRB      USING RBSECT,R2
+         LA    R3,XRB.RBOPSW           RBOPSW
+         USING PSW,R3
+         DROP  XRB
+         MVC   DSASVXEA,PSWIA          SVXE address
+         NI    DSASVXEA,XFF-PSWAMODE31 turn off AMODE bit
+         L     R3,DSASVXEA             SVXE
+         SL    R3,=AL4(SVXE@PFX)       SVXE prefix
+         USING SVXE,R3
+         CLC   SVXEID,=CL4'SVXE'       SVXE?                       @02A
+         BNE   SVC0055                 no                          @02A
+         L     R8,SVXESVXA             SVX address
+         USING SVX,R8
+         CLC   SVXID,=CL4'SVX'         SVX?
+         BNE   SVC0055                 no
+         ST    R8,DSASVXA              save SVX locally
+         OI    ZSAFLG1,ZSA@SVX         yes
+         TM    ZSAFLG1,ZSA@ZSVT        ZSVT valid?
+         BZ    SVC0050                 no
+         ZTRCE SVC=A,LINKAGE=LOCAL,ZSVT=(R6)
+         DROP  R3
+*
+**       Copy parm ARs and GPRs
+*
+SVC0050  DS    0H
+         MVC   SVXOLGRS,ZSASAVE        copy low GPRs
+         MVC   SVXOHGRS,ZSAHSAVE       copy high GPRs
+         MVC   SVXOARS,DSAARS          copy ARs
+         ZTRCE SVC=B,LINKAGE=LOCAL,ZSVT=(R6)
+*
+**       SVC screen attached TCB
+*
+         TM    SVXFLG3,SVX@ATTC        ATTACH SVC?
+         BZ    SVC0055                 no
+         ICM   R3,15,ZSAGR15           attach successful?
+         BNZ   SVC0055                 no
+         ICM   R3,15,ZSAGR1            TCB address init?
+         BZ    SVC0055                 no
+XTCB     USING TCB,R3                  yes
+         CLC   XTCB.TCBTCBID,=CL4'TCB' Valid indeed?
+         BNE   SVC0055                 no
+         MVC   XTCB.TCBSVCA2,TCBSVCA2  copy screening table        @02A
+         OI    XTCB.TCBFLGS7,TCBSVCS   activate screening
+         OI    XTCB.TCBFLGS7,TCBSVCSP  set attach propagation      @02A
+         OI    ZSAFLG3,ZSA@ATTC        attched TCB SVC screened
+         TM    ZSAFLG1,ZSA@ZSVT        ZSVT valid?
+         BZ    SVC0055                 no
+         ZTRCE SVC=C,LINKAGE=LOCAL,ZSVT=(R6)
+         DROP  XTCB
+*
+**       Recovery retry routine
+*
+SVC0055  DS    0H
+         TM    FRRFLG1,FRR@RTRY        FRR entered?
+         BZ    SVC0060                 no
+         OI    ZSAFLG1,ZSA@ABND        yes
+         TM    ZSAFLG1,ZSA@ZSVT        ZSVT valid?
+         BZ    SVC0060                 no
+         ZTRCE SVC=D,LINKAGE=LOCAL,ZSVT=(R6)
+*
+**       Delete FRR recovery
+*
+SVC0060  DS    0H
+         SETFRR D,WRKREGS=(R14,R15)    delete FRR
+         TM    ZSAFLG1,ZSA@ZSVT        ZSVT valid?
+         BZ    SVC0065                 no
+         ZTRCE SVC=E,LINKAGE=LOCAL,ZSVT=(R6)
+*
+**       Release LOCAL lock
+*
+SVC0065  DS    0H
+         SETLOCK RELEASE,TYPE=LOCAL,REGS=SAVE,                         +
+               RELATED=('Unserialize local supervisor')
+         L     R2,DSARSN               set RSN
+         TM    ZSAFLG1,ZSA@ABND        did we fail?
+         BNZ   SVCABEND                yes
+         TM    ZSAFLG1,ZSA@ZSVT        ZSVT valid?
+         BZ    SVC0070                 no
+         ZTRCE SVC=F,LINKAGE=LOCAL,ZSVT=(R6)
+*
+**       Restore SVC caller environment
+*
+SVC0070  DS    0H
+         ZCALL SR=RESTORE              restore environment
+         TM    ZSAFLG1,ZSA@ZSVT        ZSVT valid?
+         BZ    SVC0999                 no
+         ZTRCE SVC=G,LINKAGE=LOCAL,ZSVT=(R6)
+*
+**       Log SVC return data record
+*
+SVC0999  DS    0H
+         TM    SVXFLG3,SVX@60CT        INITator TCB?
+         BNZ   SVCEXIT                 yes
+         CLC   SVCESTCB,PSATOLD        INITiator TCB?
+         BE    SVCEXIT                 yes
+         ICM   R1,15,DSASVXA           SVX?
+         BZ    SVCEXIT                 no
+         MVC   SVXSRID,=CL3'&LOGEND'   END log request
+         ZCALL EP=RMSLOG               RMSLOG processor
+         TM    ZSAFLG1,ZSA@ZSVT        ZSVT?
+         BZ    SVCEXIT                 no
+         ZTRCE SVC=H,LINKAGE=LOCAL,ZSVT=(R6)
+         B     SVCEXIT                 exit
+*---------------------------------------------------------------------*
+*        SVC Exit                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+SVCEXIT  DS    0H
+         TM    ZSAFLG1,ZSA@SVCE        SVCE valid?
+         BZ    SVCXIT10                no
+         MVC   SVCESVCF,ZSAFLG1        copy ZSA flags
+         TM    ZSAFLG1,ZSA@ZSVT        ZSVT valid?
+         BZ    SVCXIT10                no
+         ZTRCE SVC=I,LINKAGE=LOCAL,ZSVT=(R6)
+*
+**       Storage release SVXE
+*
+SVCXIT10 DS    0H
+         ICM   R3,15,DSASVXEA          SVXE?
+         BZ    SVCXIT20                no
+         SL    R3,=AL4(SVXE@PFX)       SVXE prefix
+         USING SVXE,R3
+         L     R0,SVXESIZE             SVXE size
+         BZ    SVCXIT20                no
+         XC    DSASVXEA,DSASVXEA       SVXE freed
+         STORAGE RELEASE,COND=NO,                                      +
+               ADDR=(R3),LENGTH=(R0),SP=255,LINKAGE=SYSTEM
+         DROP  R3
+         TM    ZSAFLG1,ZSA@ZSVT        ZSVT valid?
+         BZ    SVCXIT20                no
+         ZTRCE SVC=J,LINKAGE=LOCAL,ZSVT=(R6)
+*
+**       Storage release SVX
+*
+SVCXIT20 DS    0H
+         ICM   R1,15,DSASVXA           SVX?
+         BZ    SVCXIT30                no
+         L     R0,SVXSIZE              SVX size
+         XC    DSASVXA,DSASVXA         SVX freed
+         STORAGE RELEASE,COND=NO,                                      +
+               ADDR=(R1),LENGTH=(R0),SP=255,LINKAGE=SYSTEM
+         TM    ZSAFLG1,ZSA@ZSVT        ZSVT valid?
+         BZ    SVCXIT30                no
+         ZTRCE SVC=K,LINKAGE=LOCAL,ZSVT=(R6)
+*
+**       Storage release DSA
+*
+SVCXIT30 DS    0H
+         LAM   AR6,AR9,DSAARS          protect parameter ARs
+         STORAGE RELEASE,COND=NO,                                      +
+               ADDR=(R11),LENGTH=DSA@SIZE,SP=255,LINKAGE=SYSTEM
+         TM    ZSAFLG1,ZSA@ZSVT        ZSVT valid?
+         BZ    SVCXIT40                no
+         ZTRCE SVC=L,LINKAGE=LOCAL,ZSVT=(R6)
+*
+**       Restore SVC caller ARs/GPRs
+*
+SVCXIT40 DS    0H
+         LM    R15,R1,ZSAOPAR          reload low GPRs
+         LMH   R14,R1,ZSAHSAVE         reload high GPRs
+         CPYA  AR0,AR6                 load AR0 from AR6
+         CPYA  AR1,AR7                 load AR1 from AR7
+         CPYA  AR14,AR8                load AR14 from AR8
+         CPYA  AR15,AR9                load AR15 from AR9
+*
+**       Return to exit prolog
+*
+SVCXIT99 DS    0H
+         L     R14,ZSAGR14             exit prolog
+         TM    ZSAFLG1,ZSA@SVCS        reactivate screening?
+         BZR   R14                     no
+         OI    TCBFLGS7,TCBSVCS        reactivate screening
+         OI    TCBFLGS7,TCBSVCSP       reactivate attach propagation
+         BR    R14                     return to exit prolog
+*---------------------------------------------------------------------*
+*        TRACE Exit                                                   *
+*--------+---------+---------+---------+---------+---------+---------+*
+SVCTRCE  DS    0H
+         L     R3,FLCCVT
+         USING CVT,R3
+         L     15,CVTCSRT            CSR table
+         L     15,X'14'(15,0)        Name/Token vector
+         L     15,X'08'(15,0)        IEANTRT
+         LA    R3,DSATOKEN           token workarea
+         USING TOKN,R3
+         MVC   TOKNNAME,=CL16'&TOKEN'
+*
+         MVC   DSARSN,=AL4(RSN116)   RSN
+         CALL  (15),(ZRTLEVEL,TOKNNAME,TOKNDATA,ZSAGR15),              +
+               MF=(E,DSAPLIST)
+         CLC   ZSAGR15,=AL4(IEANT_OK) token found?
+         BNE   SVCTRXIT              no
+*
+         MVC   DSARC,=AL4(RC8)       RC
+         MVC   DSARSN,=AL4(RSN120)   RSN
+         ICM   R6,15,TOKNZSVT        ZSVT?
+         BZ    SVCTRXIT              no
+         MVC   DSARSN,=AL4(RSN124)   RSN
+         USING ZSVT,R6
+         CLC   ZSVTID,=CL4'ZSVT'     ZSVT?
+         BNE   SVCTRXIT              no
+         DROP  R3
+*
+         MVC   DSARSN,=AL4(RSN136)   RSN
+         ICM   R3,15,ZSVTSIZE        ZSVT size?
+         BZ    SVCTRXIT              no
+         LA    R3,0(R3,R6)           ZSVT end
+         ICM   R1,15,ZSAGR0          crumb data value offset
+         BZ    SVCTRXIT              no
+         LA    R1,0(R1,R6)           crumb data value address
+         CR    R1,R3                 inbound?
+         BNL   SVCTRXIT              no
+*
+         MVC   DSARSN,=AL4(RSN128)   RSN
+         ICM   R1,15,ZSAGR1          crumb data address offset
+         BZ    SVCTRXIT              no
+         LA    R1,0(R1,R6)           crumb data value address
+         CR    R1,R3                 inbound?
+         BNL   SVCTRXIT              no
+*
+         L     R1,ZSAGR0             crumb data value offset
+         LA    R1,0(R1,R6)           get address
+         L     R2,ZSAGR1             crumb data address offset
+         LA    R2,0(R2,R6)           get address
+         MVC   0(1,R2),0(R1)         init crumb data value
+*
+SVCTRXIT DS    0H
+         MVC   ZSAGR15,DSARC         set RC
+         MVC   ZSAGR0,DSARSN         set RSN
+         STORAGE RELEASE,COND=NO,                                      +
+               ADDR=(R11),LENGTH=DSA@SIZE,SP=255,LINKAGE=SYSTEM
+*
+         LM    R14,R1,ZSASAVE        reload low GPRs
+         LMH   R14,R1,ZSAHSAVE       reload high GPRs
+         L     R14,ZSAGR14           exit prolog EPA
+         BR    R14                   return
+*---------------------------------------------------------------------*
+*        ABEND Exit                                                   *
+*--------+---------+---------+---------+---------+---------+---------+*
+SVCABEND DS    0H
+         ABEND &UCODE,DUMP,REASON=(R2)
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+RMSFRRX  DC    V(RMSFRR)             FRR routine
+ZDELTA   DC    AL4(4)                SVC delta
+SVXEPFIX DC    AL4(SVXE@PFX)         SVXE prefix length
+ZRTLEVEL DC    AL4(IEANT_SYSTEM_LEVEL)
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        RESTORE                                             */
+*/*                                                                  */
+*/* Function:    Restore SVC screening routine                       */
+*/*                                                                  */
+*/* Description: Update SVC caller PSW and reactivate SVC            */
+*/*              screening.                                          */
+*/*                                                                  */
+*/* Input Regs:  R4  TCB  address                                    */
+*/*              R5  SVRB address                                    */
+*/*              R11 DSA  address                                    */
+*/*              R12 ZSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  RB   address                                    */
+*/*              R6  ZSVT address                                    */
+*/*              R8  SVX  address                                    */
+*/*              R9  SVCE address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 DSA  address                                    */
+*/*              R12 ZSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R0  output parameter                                */
+*/*              R1  output parameter                                */
+*/*              R15 return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+RESTORE  DS    0H
+         ENTRY RESTORE
+         USING ZSVT,R6
+         USING DSA,R11
+         USING ZSA,R12
+         B     12(,R15)
+         DC    CL8'RESTORE'            TYPE-3 SVC
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 set base address
+         USING RESTORE,R10             base addressability
+         LA    R1,DSASVCSA
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+*
+**       Establish addressability
+*
+         L     R8,DSASVXA              SVX
+         USING SVX,R8
+         L     R9,DSASVCEA             SVCE
+         USING SVCE,R9
+         L     R6,SVCESVTA             ZSVT
+         USING ZSVT,R6
+         L     R5,SVXRBA               caller RB
+         USING RBSECT,R5
+         TM    ZSAFLG1,ZSA@ZSVT        ZSVT valid?
+         BZ    REST000                 no
+         ZTRCE SVC=L,LINKAGE=LOCAL,ZSVT=(R6)
+*
+**       Update back-end entry count
+*
+REST000  DS    0H
+         TM    ZSAFLG1,ZSA@ZSVT        ZSVT valid?
+         BZ    REST010                 no
+         L     R14,ZSVTSVCC            entry count
+         LA    R15,1(,R14)             add one
+         CS    R14,R15,ZSVTSVCC        update count
+         BNE   REST000                 changed: try again
+         ZTRCE SVC=M,LINKAGE=LOCAL,ZSVT=(R6)
+*
+**       Restore SVC caller PSW
+*
+REST010  DS    0H
+         L     R3,DSASVXEA             SVXE
+         SL    R3,=AL4(SVXE@PFX)       SVXE prefix
+         USING SVXE,R3
+         L     R4,SVXXSBA              XSB address
+         USING XSB,R4
+         L     R5,SVXRBA               RB address
+         USING RBSECT,R5
+         MVC   RBOPSW,SVXERPSW
+         MVC   XSB_ORIG_RBOPSW,SVXE8PSW
+         MVC   XSBOPSW16,SVXEFPSW
+*
+         OI    SVXFLG2,SVX@UPOK        set debug indicator
+         OI    ZSAFLG1,ZSA@CPSW        SVC caller PSW updated
+         TM    ZSAFLG1,ZSA@ZSVT        ZSVT valid?
+         BZ    REST099                 no
+         ZTRCE SVC=Q,LINKAGE=LOCAL,ZSVT=(R6)
+*
+**       Restore SVC caller registers
+*
+REST099  DS    0H
+         MVC   ZSARC,ZSAGR15           restore parm reg 15
+         MVC   ZSAPAR0,ZSAGR0          restore parm reg 0
+         MVC   ZSAPAR1,ZSAGR1          restore parm reg 1
+         OI    ZSAFLG1,ZSA@SVCS        reactivate screening
+         OI    SVXFLG2,SVX@SVCS        set debug indicator
+         ZTRCE SVC=R,LINKAGE=LOCAL,ZSVT=(R6)
+*
+RESTEXIT DS    0H
+         L     R13,GPR@BWD(,R13)       mainline save area
+         LM    R14,R12,GPR@R14(R13)    restore mainline regs
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+ZRBPRFXZ DC    AL4(RBPRFLNA)           RB prefix length
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*---------------------------------------------------------------------*
+*        SVCSVS SVC routine SVRB extended savearea                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+XSA      DSECT ,
+XSAARS   DS    0F
+XSAAR14  DS    F                       parm reg 14
+XSAAR15  DS    F                       parm reg 15
+XSAAR0   DS    F                       parm reg 0
+XSAAR1   DS    F                       parm reg 1
+XSA@ARSZ EQU   *-XSAARS
+*
+XSAGPRS  DS    0D
+XSAGR14  DS    D                       parm reg 14
+XSAGR15  DS    D                       parm reg 15
+XSAGR0   DS    D                       parm reg 0
+XSAGR1   DS    D                       parm reg 1
+XSA@GPRZ EQU   *-XSAGPRS
+*
+XSA@SIZE EQU   *-XSA                   size of XSA
+XSA@SMAX DS    0XL(48-XSA@SIZE+1)      SVRB - RBEXSAVE restriction
+*---------------------------------------------------------------------*
+*        SVCXIT SVC routine SVRB extended savearea                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZSA      DSECT ,
+ZSAFLG1  DS    XL1                     flags
+ZSA@SVX  EQU   X'80'                   SVX valid indicator
+ZSA@SVXE EQU   X'40'                   SVXE valid indicator
+ZSA@SVCS EQU   X'20'                   activate screening
+ZSA@SVCE EQU   X'10'                   SVCE valid indicator
+ZSA@TYP6 EQU   X'08'                   Type 6 SVC routine indicator
+ZSA@CPSW EQU   X'04'                   SVC caller PSWs updated
+ZSA@ZSVT EQU   X'02'                   ZSVT valid indicator
+ZSA@ABND EQU   X'01'                   ABEND indicator
+*
+ZSAFLG2  DS    XL1                     flags
+ZSA@SWAP EQU   X'80'                   PSW bytes 0-3 changed indicator
+ZSA@SWUP EQU   X'40'                   caller PSW updated indicator
+ZSA@XPSW EQU   X'20'                   XSB PSWs updated indicator
+ZSA@DSAI EQU   X'10'                   DSA storage obtained indicator
+ZSA@FRRS EQU   X'08'                   SETFRR issued indicator
+ZSA@TRCE EQU   X'04'                   ZTRC trace call indicator
+ZSA@SCRN EQU   X'02'                   SVC screening entry indicator
+ZSA@BAK2 EQU   X'01'                   SVCSVS(BACKUP2) caller indicator
+*
+ZSAFLG3  DS    XL1                     flags
+ZSA@ATTC EQU   X'80'                   ATTACH/X SVC screened indicator
+ZSA@3RV1 EQU   X'40'                   -available
+ZSA@3RV2 EQU   X'20'                   -available
+ZSA@3RV3 EQU   X'10'                   -available
+ZSA@3RV4 EQU   X'08'                   -available
+ZSA@3RV5 EQU   X'04'                   -available
+ZSA@3RV6 EQU   X'02'                   -available
+ZSA@3RV7 EQU   X'01'                   -available
+*
+ZSASVCN  DS    XL1                     issued SVC number
+*
+ZSAOPAR  DS    0F
+ZSARC    DS    F                       output R15
+ZSAPAR0  DS    F                       output R0
+ZSAPAR1  DS    F                       output R1
+ZSA@ORSZ EQU   *-ZSAOPAR
+*
+ZSASAVE  DS    0F                      savearea
+ZSAGR14  DS    F                       exit prolog reg 14
+ZSAGR15  DS    F                       parm reg 15
+ZSAGR0   DS    F                       parm reg 0
+ZSAGR1   DS    F                       parm reg 1
+ZSA@IRSZ EQU   *-ZSASAVE
+*
+ZSAHSAVE DS    0F                      savearea
+ZSAHGR14 DS    F                       parm high reg 14
+ZSAHGR15 DS    F                       parm high reg 15
+ZSAHGR0  DS    F                       parm high reg 0
+ZSAHGR1  DS    F                       parm high reg 1
+ZSA@HRSZ EQU   *-ZSAHSAVE
+         DS    0D
+ZSA@SIZE EQU   *-ZSA                   size of ZSA
+ZSA@SMAX DS    0XL(48-ZSA@SIZE+1)      SVRB - RBEZSAVE restriction
+*---------------------------------------------------------------------*
+*        SVCXIT SVC routine dynamic storage area                      *
+*--------+---------+---------+---------+---------+---------+---------+*
+DSA      DSECT ,
+DSASAVE  DS    18F                     mainline savearea
+DSASVCSA DS    18F                     SVC routine savearea
+DSARGPRS DS    16F                     retry registers
+         DS    0X
+DSAFLG1  DS    XL1                     flags
+DSA@ABND EQU   X'80'                   ABEND indicator
+DSA@RV1  EQU   X'40'                   -available
+DSA@RV2  EQU   X'20'                   -available
+DSA@RV3  EQU   X'10'                   -available
+DSA@RV4  EQU   X'08'                   -available
+DSA@RV5  EQU   X'04'                   -available
+DSA@RV6  EQU   X'02'                   -available
+DSA@RV7  EQU   X'01'                   -available
+DSAFLGX  DS    XL3                     -available
+         DS    0F
+DSARC    DS    F                       RC
+DSARSN   DS    F                       RSN
+DSASVCN  DS    F                       SVC number
+DSASVRB  DS    F                       SVRB address
+DSASVXA  DS    F                       SVX address
+DSASVXEA DS    F                       SVXE address
+DSASVCEA DS    F                       SVCE address
+         DS    0F
+DSAARS   DS    0F                      Access regs
+DSAAR0   DS    F                       -AR0
+DSAAR1   DS    F                       -AR1
+DSAAR14  DS    F                       -AR14
+DSAAR15  DS    F                       -AR15
+DSA@ARSZ EQU   *-DSAARS                DONOT change order
+         DS    0F
+DSATOKEN DS    CL(TOKN@SZE)            Name/Token Pair
+         DS    0F
+DSAPLIST DS    XL128                   general PLIST
+         DS    0D
+DSA@SIZE EQU   *-DSA                   size of DSA
+*---------------------------------------------------------------------*
+*        Subsystem Data Areas                                         *
+*--------+---------+---------+---------+---------+---------+---------+*
+         PRINT GEN
+         ZSVT  ,
+         ZRWA  ,
+         ZMACS GEN=TOKEN,DSECT=YES
+         ZTABS GEN=SVMACRO
+         ZTABS GEN=SVCTBLE,DSECT=YES
+         ZTABS GEN=SVNTBLE,DSECT=YES
+         ZTABS GEN=SPNTBLE,DSECT=YES
+         ZGEQU ,
+*---------------------------------------------------------------------*
+*        System Data Areas                                            *
+*--------+---------+---------+---------+---------+---------+---------+*
+         PRINT GEN
+         IHAPSA ,
+         IHAASCB ,
+         IHAASXB ,
+         IEZJSCB ,
+         IHASCB ,
+         CVT   DSECT=YES
+         IHAECVT ,
+         IKJTCB DSECT=YES
+         IKJRB DSECT=YES
+         IHASCVT DSECT=YES,LIST=NO
+         IHASVC ,
+         IHAXSB LIST=YES
+         IHAPSW ,
+         IHAFRRS ,
+         IHASDWA ,
+         IHAWSAVT ,
+         IHACDE ,
+         IEANTASM ,
+         DCBD  DSORG=PS,DEVD=DA
+         END

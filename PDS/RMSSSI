@@ -1,0 +1,3422 @@
+RMSSSI   CSECT
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        RMSSSI                                              */
+*/*                                                                  */
+*/* Function:    ZRMS subsystem event listener and router            */
+*/*                                                                  */
+*/* Description: Receives control from the SSI and routes control    */
+*/*              to the target listener routine.                     */
+*/*                                                                  */
+*/*              - EOT                                               */
+*/*              - WTO/R                                             */
+*/*              - MGCR/E                                            */
+*/*              - Converter/interpreter                             */
+*/*              - Allocation                                        */
+*/*              - Open                                              */
+*/*              - Checkpoint                                        */
+*/*              - Restart                                           */
+*/*              - Unallocation                                      */
+*/*              - Close                                             */
+*/*                                                                  */
+*/* Input Regs:  R0  SSCT address                                    */
+*/*              R1  SSOB address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry point address                             */
+*/*                                                                  */
+*/* Regs Usage:  R6  SSOB extension address                          */
+*/*              R7  SSCT address                                    */
+*/*              R8  SSOB address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/* Attributes:  TCB mode                                            */
+*/*              Primary mode                                        */
+*/*              Reentrant                                           */
+*/*              Caller key                                          */
+*/*              Caller state                                        */
+*/*              Page-fixed                                          */
+*/*              Write-protected                                     */
+*/*              Dynamic-LPA resident                                */
+*/*                                                                  */
+*/* Copyright:   Ben Marino. 2021 - 2023 (unpublished)               */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @01 | V1R1 | 09242022 | Ben Marino  | Initial version               *
+* @02 | V1R1 | 02122023 | Ben Marino  | Serviceability enhancements   *
+*     |      |          |             |                               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+RMSSSI   AMODE 31
+RMSSSI   RMODE ANY
+         COPY  ZGBLS
+         USING RMSSSI,R15              Entry
+         STM   R14,R12,GPR@R14(R13)    save caller regs
+         B     SSI0000                 branch
+         ZMACS GEN=MID,DSECT=NO        module ID
+*
+SSI0000  DS    0H
+         DROP  R15
+         LR    R10,R15                 base
+         USING RMSSSI,R10
+         LR    R7,R0                   SSCT
+         USING SSCT,R7
+         LR    R8,R1                   SSOB
+         USING SSOB,R8
+         L     R6,SSOBINDV             SSOB extension
+         USING SSOBEXT,R6
+         XR    R2,R2
+         IPK   ,                       entry protect key
+         LR    R5,R2                   protect it
+         XR    R11,R11                 ZSVT not available
+*
+**       Obtain dynamic storage area
+*
+         STORAGE OBTAIN,LOC=ANY,COND=NO,                               +
+               LENGTH=DSA@SIZE,SP=230,KEY=(5),LINKAGE=SYSTEM
+         LR    R12,R1
+         USING DSA,R12
+         LA    R3,DSA@SIZE             DSA size
+         LR    R2,R1                   copy address
+         XR    R15,R15                 zero
+         MVCL  R2,R14                  scrub DSA
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1                  mainline savearea
+         ST    R5,DSAEKEY              save entry protect key
+         ST    R7,DSASSCT              save SSCT address
+         ST    R8,DSASSOB              save SSOB address
+*
+**       Establish listener recovery
+*
+         LA    R9,DSAZRWA              ZRWA address
+         USING ZRWA,R9
+         MVC   ZRWAID,=CL4'ZRWA'       ID
+         MVC   ZRWALMOD,MIDNAME        listener module
+         MVC   ZRWASECT,MIDNAME        listener control section
+         L     R3,RMSRTM               recovery routine
+         BSM   R3,0                    set AMODE
+         MVC   DSAPLST(ESTAEL),ESTAE
+         ESTAE (3),                                                    +
+               PARAM=(9),              ZRWA address                    +
+               TOKEN=DSATOKN,          store token here                +
+               MF=(E,DSAPLST)
+         MVC   DSARSN,=AL4(RSN44)      RSN
+         ST    R15,DSARC               RC
+         LTR   R15,R15                 successful?
+         BNZ   SSIABEND                no, ABEND
+         OI    DSAFLG1,DSA@STAE        recovery established
+*
+**       Validity check server status
+*
+         L     R11,SSCTSUSE            ZSVT
+         USING ZSVT,R11
+         MVC   DSARSN,=AL4(RSN48)      RSN
+         CLC   ZSVTID,=CL4'ZSVT'       valid indeed?
+         BNE   SSIABEND                no, ABEND
+         MVC   DSARSN,=AL4(RSN52)      RSN
+         TM    ZSVTFLG1,ZSVT@ACT       server active?
+         BZ    SSIABEND                no
+         ZTRCE SSI=0,LINKAGE=BRANCH    trace
+*
+**       Activate listener recovery
+*
+         ST    R11,ZRWAZSVT            init ZSVT address
+         MVC   ZRWASUBN,ZSVTSUBN       init ZRMS server
+         MVC   DSARSN,=AL4(RSN56)      set RSN
+         ZRETRY SSI0099,RSN=DSARSN     set retry address
+*
+**       Update listener entry count
+*
+SSI0010  DS    0H
+         SPKA  0(0)                    ZSVT key
+         L     R2,ZSVTSSIC             listener count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZSVTSSIC          update count
+         BNE   SSI0010                 changed: try again
+*
+**       Init common entry points
+*
+         MVC   ZSVTRTMA,=V(RMSRTM)     RMSRTM access
+         MVC   ZSVTMSGA,=V(RMSMSG)     RMSMSG access
+         L     R2,DSAEKEY              entry protect key
+         SPKA  0(2)                    restore key
+*
+**       Locate function listener
+*
+         LA    R5,SSITABLE             function table
+         USING SST,R5
+*
+SSI0020  DS    0H
+         CLC   SSTEPA,SSITEND          end of table?
+         BNE   SSI0030                 no
+         ZTRCE SSI=1,LINKAGE=BRANCH    trace
+         B     SSI0099                 exit
+*
+SSI0030  DS    0H
+         CLC   SSOBFUNC,SSTFC          function code match?
+         BE    SSI0040                 yes
+         LA    R5,SST@SIZE(,R5)        no, next entry
+         B     SSI0020                 loop
+*
+**       Check caller authorization
+*
+SSI0040  DS    0H
+         TM    ZSVTFLG2,ZSVT@SAF       class specified?
+         BZ    SSI0060                 no
+         TM    SSTSAF,SST@CALL         SAF=CALL option?
+         BZ    SSI0060                 no
+         MVC   DSARACF,=AL4(2)         UACC=READ
+         MVC   DSACZSZE,ZSVTCSZE       CLASS name size
+         MVC   DSACZRMS,ZSVTCLAS       init class name
+         MVI   DSAENTTY,BLANK
+         MVC   DSAENTTY+1(DSA@ENTL-1),DSAENTTY
+         MVC   DSAENTEL(SSAFNAMZ),SSAF profile length+name
+         LA    R1,DSA@ENTZ             profile buffer length
+         STH   R1,DSAENTBL             set buffer length
+         L     R2,DSARACF              UACC attribute
+         MVC   DSAPLST(RACI@SZE),RACILST
+         RACROUTE REQUEST=AUTH,                                        +
+               ENTITYX=DSAENTBF,       profile buffer                  +
+               CLASS=DSACLASS,         resource class                  +
+               ATTR=(2),               UACC attribute                  +
+               LOG=ASIS,               whatever                        +
+               RELEASE=1.9,            server release                  +
+               WORKA=DSAXWORK,         SAF workarea                    +
+               MF=(E,DSAPLST)
+         ST    R15,DSAXRC              SAF RC
+         LA    R3,DSAPLST              RACROUTE listform
+         USING SAFP,R3
+         MVC   DSARC,SAFPRRET          RACF RC
+         MVC   DSARSN,SAFPRREA         RACF RSN
+         CLC   DSAXRC,=AL4(RC0)        SAF RC okay?
+         BNE   SSI0050                 no
+         CLC   DSARC,=AL4(RC0)         RACF authorized?
+         BE    SSI0060                 no
+*
+**       SAF authorization failed
+*
+SSI0050  DS    0H
+         ZWTO  MID=ZRMS19E,                                            +
+               V1=DSAXRC,              show SAF RC                     +
+               V2=DSAXRC,              show security server RC         +
+               V3=DSAXRC,              show security server DSN        +
+               V4=SSAFNAME             show source name
+         ZTRCE SSI=2,LINKAGE=BRANCH    trace
+         B     SSI0999                 exit
+         DROP  R3
+*
+**       Call function listener
+*
+SSI0060  DS    0H
+         L     R15,SSTEPA              routine EPA
+         BSM   R15,0                   set AMODE
+         BASR  R14,R15                 call function routine
+         ZTRCE SSI=3,LINKAGE=BRANCH    trace
+*
+**       Reactivate recovery
+*
+         MVC   DSARSN,=AL4(RSN56)      set RSN
+         ZRETRY SSIEXIT,RSN=DSARSN     set retry address
+         ZTRCE SSI=4,LINKAGE=BRANCH    trace
+*
+**       Set function return code
+*
+SSI0099  DS    0H
+         L     R3,SSOBRETN             RC
+         ZTRCE SSI=5,LINKAGE=BRANCH    trace
+         B     SSIEXIT                 exit
+*
+**       Authorization error
+*
+SSI0999  DS    0H
+         MVC   DSARC,=AL4(RC4)         RC
+         MVC   SSOBRETN,=AL4(SSAGDDER) RC
+         ZTRCE SSI=6,LINKAGE=BRANCH    trace
+*---------------------------------------------------------------------*
+*        Normal Exit                                                  *
+*--------+---------+---------+---------+---------+---------+---------+*
+SSIEXIT  DS    0H
+         TM    DSAFLG1,DSA@STAE        recovery active?
+         BZ    SSIXIT00                no
+         NI    DSAFLG1,XFF-DSA@STAE    reset indicator
+         ESTAE 0,TOKEN=DSATOKN         deactivate recovery
+         ZTRCE SSI=7,LINKAGE=BRANCH    trace
+*
+SSIXIT00 DS    0H
+         L     R13,GPR@BWD(,R13)       caller savearea
+         L     R2,DSAEKEY              caller protect key
+         STORAGE RELEASE,COND=NO,SP=230,KEY=(2),                       +
+               ADDR=(12),LENGTH=DSA@SIZE,LINKAGE=SYSTEM
+         ZTRCE SSI=8,LINKAGE=BRANCH    trace
+*
+SSIXIT99 DS    0H
+         ST    R3,GPR@R15(,R13)        return RC
+         LM    R14,R12,GPR@R14(R13)    restore regs
+         BR    R14                     return to SSI
+*---------------------------------------------------------------------*
+*        ABEND Exit                                                   *
+*--------+---------+---------+---------+---------+---------+---------+*
+SSIABEND DS    0H
+         L     R2,DSARC                RC
+         L     R3,DSARSN               RSN
+         ABEND &UCODE,DUMP,REASON=(R3)
+*---------------------------------------------------------------------*
+*        Dummy SSI Exit                                               *
+*--------+---------+---------+---------+---------+---------+---------+*
+DUMMYSSI DS    0H
+         L     R8,DSASSOB              SSOB
+         USING SSOB,R8
+         XC    SSOBRETN,SSOBRETN       RC
+         XR    R15,R15                 RC
+         BR    R14                     return to mainline
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+RMSRTM   DC    V(RMSRTM)               RMSRTM
+ESTAE    ESTAE 0,MF=L                  listform
+ESTAEL   EQU   *-ESTAE
+*---------------------------------------------------------------------*
+*        Listener routine table                                       *
+*--------+---------+---------+---------+---------+---------+---------+*
+SSITABLE DS    0F
+         ZTABS GEN=SST,TYPE=INITIAL
+*
+         ZTABS GEN=SST,                                                +
+               TYPE=ENTRY,                                             +
+               FC=SSOBFEOT,            IEFSSET                         +
+               EP=EOTSSI,              EOT broadcast function          +
+               SAF=NOCALL,             SAF=NOCALL Auth not required    +
+               KEY=0                   entry protect key
+*
+         ZTABS GEN=SST,                                                +
+               TYPE=ENTRY,                                             +
+               FC=SSOBWTO,             IEFSSWT                         +
+               EP=WTOSSI,              WTO broadcast function          +
+               SAF=NOCALL,             SAF=NOCALL Auth not required    +
+               KEY=0                   entry protect key
+*
+         ZTABS GEN=SST,                                                +
+               TYPE=ENTRY,                                             +
+               FC=SSOBAGRP,            IEFSSAG                         +
+               EP=ALLOSSI,             Allocation group function       +
+               SAF=CALL,               SAF=CALL Auhorization required  +
+               KEY=1                   entry protect key
+*
+         ZTABS GEN=SST,                                                +
+               TYPE=ENTRY,                                             +
+               FC=SSOBUNAL,            IEFSSAL                         +
+               EP=UNALSSI,             unallocation group function     +
+               SAF=NOCALL,             SAF=NOCALL Auth not required    +
+               KEY=1                   entry protect key
+*
+         ZTABS GEN=SST,                                                +
+               TYPE=ENTRY,                                             +
+               FC=SSOBALOC,            IEFSSAL                         +
+               EP=DUMMYSSI,            NOP allocation function         +
+               SAF=NOCALL,             SAF=NOCALL Auth not required    +
+               KEY=1                   entry protect key
+*
+         ZTABS GEN=SST,                                                +
+               TYPE=ENTRY,                                             +
+               FC=SSOBALCU,            IEFSSAL                         +
+               EP=DUMMYSSI,            NOP unauth-allocation function  +
+               SAF=NOCALL,             SAF=NOCALL Auth not required    +
+               KEY=1                   entry protect key
+*
+         ZTABS GEN=SST,                                                +
+               TYPE=ENTRY,                                             +
+               FC=SSOBCONV,            IEFSSCI                         +
+               EP=DUMMYSSI,            NOP converter function          +
+               SAF=NOCALL,             SAF=NOCALL Auth not required    +
+               KEY=1                   entry protect key
+*
+         ZTABS GEN=SST,                                                +
+               TYPE=ENTRY,                                             +
+               FC=SSOBOPEN,            IEFSSDA                         +
+               EP=DUMMYSSI,            NOP open function               +
+               SAF=NOCALL,             SAF=NOCALL Auth not required    +
+               KEY=5                   entry protect key
+*
+         ZTABS GEN=SST,                                                +
+               TYPE=ENTRY,                                             +
+               FC=SSOBCLOS,            IEFSSDA                         +
+               EP=DUMMYSSI,            NOP close function              +
+               SAF=NOCALL,             SAF=NOCALL Auth not required    +
+               KEY=5                   entry protect key
+*
+         ZTABS GEN=SST,                                                +
+               TYPE=ENTRY,                                             +
+               FC=SSOBCKPT,            IEFSSDA                         +
+               EP=DUMMYSSI,            NOP checkpoint function         +
+               SAF=NOCALL,             SAF=NOCALL Auth not required    +
+               KEY=5                   entry protect key
+*
+         ZTABS GEN=SST,                                                +
+               TYPE=ENTRY,                                             +
+               FC=SSOBREST,            IEFSSDA                         +
+               EP=DUMMYSSI,            NOP restore function            +
+               SAF=NOCALL,             SAF=NOCALL Auth not required    +
+               KEY=5                   entry protect key
+*
+         ZTABS GEN=SST,TYPE=FINAL
+*
+SSI@TSZE EQU   *-SSITABLE
+         DS    0F
+SSITEND  DC    AL4(-1)                 end-of-table marker
+*---------------------------------------------------------------------*
+*        RACROUTE Listform                                            *
+*--------+---------+---------+---------+---------+---------+---------+*
+SSAF     DS    0F
+SSAFLEN  DC    AL2(SSAFNAML)
+SSAFNAME DC    C'MONITOR.ZRMS.JCL'
+SSAFNAML EQU   *-SSAFNAME
+SSAFNAMZ EQU   *-SSAF
+         DS    0F
+RACILST  RACROUTE REQUEST=AUTH,CLASS=0,ENTITYX=0,RELEASE=1.9,MF=L
+RACI@SZE EQU   *-RACILST
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        ALLOSSI                                             */
+*/*                                                                  */
+*/* Function:    Allocation of SUBSYS DD function routine            */
+*/*                                                                  */
+*/* Input Regs:  R6  SSAG address                                    */
+*/*              R7  SSCT address                                    */
+*/*              R8  SSOB address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs usage:  R5  SSWA  address                                   */
+*/*              R6  SSAG  address                                   */
+*/*              R7  SSARB address                                   */
+*/*              R8  SSOB  address                                   */
+*/*              R9  ZRWA  address                                   */
+*/*              R10 base  address                                   */
+*/*              R11 ZSVT  address                                   */
+*/*              R12 DSA   address                                   */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/* Note:        Listener routine runs under the initiator jobstep   */
+*/*              task TCB (IEFIIC/IEFSD060).                         */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+ALLOSSI  DS    0H
+         USING SSOBEXT,R6              SSAG
+         USING SSOB,R8
+         USING ZRWA,R9
+         USING ZSVT,R11
+         USING DSA,R12
+         B     12(,R15)
+*
+ALLOID   DC    CL8'ALLOSSI'            ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base address
+         USING ALLOSSI,R10
+         LA    R1,DSARSSA              routine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         MVC   ZRWASECT,ALLOID         ID
+*
+**       Activate recovery
+*
+         MVC   DSARSN,=AL4(RSN60)      set RSN
+         ZRETRY ALLOERR,RSN=DSARSN     set retry address
+*
+**       Update listener entry count
+*
+ALLO000  DS    0H
+         SPKA  0(0)                    ZSVT key
+         L     R2,ZSVTALOC             listener count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZSVTALOC          update count
+         BNE   ALLO000                 changed: try again
+         MVC   ZSVTKEY1,DSAEKEY        save scheduler key
+         L     R2,DSAEKEY              entry protect key
+         SPKA  0(2)                    restore key
+         ZTRCE ALO=A,LINKAGE=BRANCH    trace
+*
+**       Terminate previous screening instance
+*
+         ZCALL SR=TRMSVC
+         ZTRCE ALO=B,LINKAGE=BRANCH    trace
+*
+**       Extract allocation parmdata
+*
+         L     R7,SSAGARBP             SSARB
+         USING SSARB,R7
+         L     R3,SSAGJBNM             JOBname ptr
+         MVC   DSAGJBNM,0(R3)          copy JOB name
+         L     R3,SSAGDDNM             SUBSYS DD ptr
+         MVC   DSAAGDDN,0(R3)          copy SUBSYS DD name
+         L     R5,SSAGSSWA             SSWA
+         USING SSWA,R5
+         CLC   SSWAPRNO,=AL2(0)        parmdata?
+         BNE   ALLO010                 yes
+         ZWTO  MID=ZRMS81E,                                            +
+               V1==CL46'INVALID SUBSYS DD PARAMETER DATA SPECIFIED'
+         B     ALLOERR                 error exit
+*
+**       Locate monitor log DD name
+*
+ALLO010  DS    0H
+         ZCALL SR=DDNAME
+         LTR   R15,R15                 successful?
+         BZ    ALLO015                 yes
+         ZTRCE ALO=C,LINKAGE=BRANCH    trace
+         B     ALLOERR                 error exit
+*
+ALLO015  DS    0H
+         LA    R3,SSWAPREN             1st entry
+         USING SSWAIFLD,R3
+*
+**       Copy screening parmdata
+*
+         LH    R2,SSWAPRNO             parmdata entries
+         CH    R2,=H'7'                max parmdata exceeded?
+         BNH   ALLO020                 no
+         ZWTO  MID=ZRMS81E,                                            +
+               V1==CL46'SUBSYS DD MAXIMUM ALLOWED PARM DATA EXCEEDED'
+         B     ALLOERR
+*
+ALLO020  DS    0H
+         LA    R5,SSWAHDRL(,R5)        skip SSWA header
+         DROP  R5
+         LA    R4,DSAPARM              parmdata
+         MVC   DSAPARML,=F'1'          current length
+         MVC   DSADATA1,ZSVTBLKS       scrub
+         MVI   DSADATA1,COMMA          separator
+         MVC   DSADATA2,ZSVTBLKS       scrub
+         ZTRCE ALO=D,LINKAGE=BRANCH    trace
+         B     ALLO030                 copy parmdata
+*
+ALLO025  DS    0H
+         MVI   0(R4),COMMA             replace blank w/comma
+         LA    R4,1(,R4)               next data slot
+         ZTRCE ALO=E,LINKAGE=BRANCH    trace
+*
+ALLO030  DS    0H
+         SR    R1,R1
+         IC    R1,SSWAILEN             parmdata length
+         LR    R15,R1                  copy length
+         A     R15,DSAPARML            add length
+         ST    R15,DSAPARML            save total length
+         BCTR  R1,0                    subtract one
+         EX    R1,COPYPARM             copy parmdata
+         LA    R4,1(R1,R4)             next parmdata slot
+         LA    R5,2(R1,R5)             next parm entry
+         LR    R3,R5                   set addressability
+         BCT   R2,ALLO025              loop
+         ZTRCE ALO=F,LINKAGE=BRANCH    trace
+*
+**       Initialize parser workarea
+*
+         ZCALL SR=ZPARSER,=CL4'&PARINI'
+         LTR   R15,R15                 successful?
+         BNZ   ALLOERR                 no
+*
+**       Parse audit log options
+*
+         ZCALL SR=OPTIONS
+         LTR   R15,R15                 successful?
+         BZ    ALLO040                 yes
+         ZTRCE ALO=G,LINKAGE=BRANCH    trace
+         B     ALLOERR                 error exit
+*
+**       Process reuested SVC list
+*
+ALLO040  DS    0H
+         ZCALL SR=SVCPRO
+         LTR   R15,R15                 successful?
+         BZ    ALLO050                 yes
+         ZTRCE ALO=H,LINKAGE=BRANCH    trace
+         B     ALLOERR                 error exit
+*
+**       Process requested SP list
+*
+ALLO050  DS    0H
+         ZCALL SR=SPNPRO
+         LTR   R15,R15                 successful?
+         BZ    ALLO060                 yes
+         ZTRCE ALO=I,LINKAGE=BRANCH    trace
+         B     ALLOERR                 error exit
+*
+**       Capture address space data
+*
+ALLO060  DS    0H
+         ZCALL SR=ASDATA
+         LTR   R15,R15                 successful?
+         BZ    ALLO070                 yes
+         ZTRCE ALO=J,LINKAGE=BRANCH    trace
+         B     ALLOERR                 error exit
+*
+**       Check storage attributes
+*
+ALLO070  DS    0H
+         TM    DSAFLG1,DSA@SPNM        SP= specified?
+         BZ    ALLO080                 no
+         TM    DSAFLG2,DSA@STOR        getmain/freemain?
+         BNZ   ALLO080                 yes
+         ZWTO  MID=ZRMS81E,                                            +
+               V1==CL46'SP= ONLY VALID WITH GETMAIN/FREEMAIN SPECIFIED'
+         B     ALLOERR                 error exit
+*
+**       Locate STAB storage table
+*
+ALLO080  DS    0H
+         ZCALL SR=CRESTAB
+         LTR   R15,R15                 successful?
+         BZ    ALLO090                 yes
+         ZTRCE ALO=K,LINKAGE=BRANCH    trace
+         B     ALLOERR                 error exit
+*
+**       Initialize current screening instance
+*
+ALLO090  DS    0H
+         ZCALL SR=INISVC               current instance
+         LTR   R15,R15                 successful?
+         BNZ   ALLOERR                 no
+         ZCALL SR=ZPARSER,=CL4'&PARTRM'
+         XC    DSARC,DSARC             RC
+         MVC   SSOBRETN,=AL4(SSAGRTOK) RC
+         ZTRCE ALO=L,LINKAGE=BRANCH    trace
+         B     ALLOXIT                 exit
+*
+**       Terminate current screening instance
+*
+ALLOERR  DS    0H
+         ZCALL SR=ZPARSER,=CL4'&PARTRM'
+         ZCALL SR=TRMSVC
+         ZTRCE ALO=M,LINKAGE=BRANCH    trace
+         MVC   DSARC,=AL4(RC4)         RC
+         MVC   SSOBRETN,=AL4(SSAGDDER) RC
+         ZWTO  MID=ZRMS85E,V1=DSAAGDDN
+         ZTRCE ALO=N,LINKAGE=BRANCH    trace
+*
+ALLOXIT  DS    0H
+         L     R15,DSARC               RC
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R0,R12,GPR@R0(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        EXecuted Instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+COPYPARM MVC   0(*-*,R4),SSWAIPRM      copy parmdata
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        UNALSSI                                             */
+*/*                                                                  */
+*/* Function:    Unallocation of SUBSYS DD function routine          */
+*/*                                                                  */
+*/* Input Regs:  R6  SSAL address                                    */
+*/*              R7  SSCT address                                    */
+*/*              R8  SSOB address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R6  SSAL address                                    */
+*/*              R7  SVCE address                                    */
+*/*              R8  SSOB address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/* Note:        Listener routine runs under the initiator jobstep   */
+*/*              task TCB (IEFIIC/IEFSD060).                         */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+UNALSSI  DS    0H
+         USING SSOBEXT,R6              SSAL
+         USING SSOB,R8
+         USING ZRWA,R9
+         USING ZSVT,R11
+         USING DSA,R12
+         B     12(,R15)
+*
+UNALID   DC    CL8'UNALSSI'            ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base address
+         USING UNALSSI,R10
+         LA    R1,DSARSSA              routine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         MVC   ZRWASECT,UNALID         ID
+         ZTRCE UNL=A,LINKAGE=BRANCH    trace
+*
+**       Activate recovery
+*
+         MVC   DSARSN,=AL4(RSN64)      set RSN
+         ZRETRY UNALERR,RSN=DSARSN     set retry address
+*
+UNAL000  DS    0H
+         SPKA  0(0)                    ZSVT key
+         L     R2,ZSVTUNLC             listener count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZSVTUNLC          update count
+         BNE   UNAL000                 changed: try again
+         MVC   ZSVTKEY1,DSAEKEY        save scheduler key
+         L     R2,DSAEKEY              entry protect key
+         SPKA  0(2)                    restore key
+         ZTRCE UNL=B,LINKAGE=BRANCH    trace
+*
+**       Deactivate SVC screening
+*
+         USING PSA,0
+         L     R4,PSATOLD              TCB
+         USING TCB,R4
+         ICM   R7,15,TCBSVCA2          SVCE?
+         BNZ   UNAL010                 yes
+         ZTRCE UNL=C,LINKAGE=BRANCH    trace
+         B     UNAL099                 no
+*
+UNAL010  DS    0H
+         USING SVCE,R7
+         CLC   SVCEID,=CL4'SVCE'       SVCE?
+         BE    UNAL020                 yes
+         ZTRCE UNL=D,LINKAGE=BRANCH    trace
+         B     UNAL099                 no
+*
+UNAL020  DS    0H
+         SPKA  0(0)                    TCB key
+         NI    TCBFLGS7,XFF-TCBSVCS    deactivate screening
+         NI    TCBFLGS7,XFF-TCBSVCSP   reset attach propagation
+         L     R2,DSAEKEY              entry protect key
+         SPKA  0(2)                    restore key
+         ZTRCE UNL=E,LINKAGE=BRANCH    trace
+*
+UNAL099  DS    0H
+         MVC   SSOBRETN,=AL4(SSALRTOK) RC
+         ZTRCE UNL=F,LINKAGE=BRANCH    trace
+         B     UNALXIT                 exit
+*
+**       Error Exit
+*
+UNALERR  DS    0H
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   SSOBRETN,=AL4(SSALCREQ) RC
+         ZWTO  MID=ZRMS86E,V1=DSAAGDDN
+         ZTRCE UNL=G,LINKAGE=BRANCH    trace
+*
+UNALXIT  DS    0H
+         L     R2,DSAEKEY              caller protect key
+         SPKA  0(2)                    restore key
+         L     R15,DSARC               RC
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R0,R12,GPR@R0(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        EOTSSI                                              */
+*/*                                                                  */
+*/* Function:    End-of-task listener routine                        */
+*/*                                                                  */
+*/* Input Regs:  R6  SSET address                                    */
+*/*              R7  SSCT address                                    */
+*/*              R8  SSOB address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  SVX  address                                    */
+*/*              R6  SSET address                                    */
+*/*              R7  SVCE address                                    */
+*/*              R8  SSOB address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/* Note:        Listener routine receives control under any         */
+*/*              terminating TCB.                                    */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+EOTSSI   DS    0H
+         USING SSOBEXT,R6              SSET
+         USING SSOB,R8                 SSOB
+         USING ZRWA,R9                 ZRWA
+         USING ZSVT,R11
+         USING DSA,R12                 DSA
+         B     12(,R15)
+*
+EOTID    DC    CL8'EOTSSI'             ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base address
+         USING EOTSSI,R10
+         LA    R1,DSARSSA              routine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         MVC   ZRWASECT,EOTID          ID
+         ZTRCE EOT=A,LINKAGE=LOCAL     trace
+*
+**       Activate recovery
+*
+         MVC   DSARSN,=AL4(RSN72)      set RSN
+         ZRETRY EOTEXIT,RSN=DSARSN     set retry address
+         ZTRCE EOT=B,LINKAGE=LOCAL     trace
+*
+**       Update listener entry count
+*
+EOT0000  DS    0H
+         L     R2,ZSVTEOTC             entry count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZSVTEOTC          update count
+         BNE   EOT0000                 changed: try again
+         MVC   ZSVTKEY0,DSAEKEY        save supervisor key
+         ZTRCE EOT=C,LINKAGE=LOCAL     trace
+*
+**       Check for SVC screening
+*
+         L     R4,SSETCBA              TCB
+         USING TCB,R4
+         ICM   R7,15,TCBSVCA2          SVCE?
+         BNZ   EOT0010                 yes
+         ZTRCE EOT=D,LINKAGE=LOCAL     trace
+         B     EOTEXIT                 exit
+*
+EOT0010  DS    0H
+         USING SVCE,R7
+         CLC   SVCEID,=CL4'SVCE'       SVCE?
+         BE    EOT0020                 yes
+         ZTRCE EOT=E,LINKAGE=LOCAL     trace
+         B     EOTEXIT                 exit
+*
+**       Locate address space instance
+*
+EOT0020  DS    0H
+         L     R3,SSETASCB             ASCB
+         USING ASCB,R3
+         L     R3,ASCBASSB             ASSB
+         USING ASSB,R3
+         CLC   SVCESTKN,ASSBSTKN       same instance?
+         BE    EOT0030                 yes
+         ZTRCE EOT=F,LINKAGE=LOCAL     trace
+         B     EOTEXIT                 exit
+         DROP  R3
+*
+**       Deactivate SVC screening
+*
+EOT0030  DS    0H
+         NI    TCBFLGS7,XFF-TCBSVCS    deactivate screening
+         NI    TCBFLGS7,XFF-TCBSVCSP   reset attach propagation
+         ZTRCE EOT=G,LINKAGE=LOCAL     trace
+*
+**       Deactivate INITiator screening
+*
+EOT0040  DS    0H
+         ICM   R3,15,SVCESTCB          INITiator TCB?
+         BNZ   EOT0050                 yes
+         ZTRCE EOT=H,LINKAGE=LOCAL     trace
+         B     EOT0060                 carry on
+*
+EOT0050  DS    0H
+ITCB     USING TCB,R3
+         NI    ITCB.TCBFLGS7,XFF-TCBSVCS deactivate auditing
+         NI    ITCB.TCBFLGS7,XFF-TCBSVCSP reset attach propagation
+         ZTRCE EOT=I,LINKAGE=LOCAL     trace
+         DROP  ITCB
+*
+**       Validity check OPEN owner
+*
+EOT0060  DS    0H
+         TM    SVCEFLG1,SVCE@OFL       Open failed?
+         BZ    EOT0070                 no
+         ZTRCE EOT=J,LINKAGE=LOCAL     trace
+         B     EOTEXIT                 exit
+*
+EOT0070  DS    0H
+         TM    SVCEFLG1,SVCE@OPN       log opened?
+         BZ    EOT0090                 no
+         CLC   SVCEOTCB,SSETCBA        OPEN owner?
+         BE    EOT0080                 yes
+         ZTRCE EOT=K,LINKAGE=LOCAL     trace
+         B     EOTEXIT                 exit
+*
+EOT0080  DS    0H
+         CLC   SVCEOASC,SSETASCB       OPEN owner?
+         BE    EOT0090                 yes
+         ZTRCE EOT=L,LINKAGE=LOCAL     trace
+         B     EOTEXIT                 exit
+*
+**       Storage obtain SVX entry
+*
+EOT0090  DS    0H
+         STORAGE OBTAIN,COND=NO,                                       +
+               SP=255,LOC=ANY,LENGTH=SVX@SIZE,LINKAGE=SYSTEM
+         LR    R5,R1                   SVX
+         USING SVX,R5
+         LR    R0,R1                   copy address
+         LA    R1,SVX@SIZE             SVX size
+         XR    R15,R15                 zero
+         MVCL  R0,R14                  scrub SVX
+         MVC   SVXID,=CL4'SVX'         ID
+         ST    R5,SVXSVXA              init SVX
+         ST    R7,SVXSVCEA             init SVCE
+         ZTRCE EOT=M,LINKAGE=LOCAL     trace
+*
+**       Terminate monitor logging
+*
+         LR    R1,R5                   SVX address
+         MVC   SVXSRID,=CL3'&LOGTRM'   terminate logging
+         ZCALL EP=RMSLOG               RMSLOG processor
+         ZTRCE EOT=N,LINKAGE=LOCAL     trace
+*
+**       Storage release SVX entry
+*
+         STORAGE RELEASE,COND=NO,SP=255,                               +
+               ADDR=(R5),LENGTH=SVX@SIZE,LINKAGE=SYSTEM
+         ZTRCE EOT=O,LINKAGE=LOCAL     trace
+*
+**       Exit
+*
+EOTEXIT  DS    0H
+         L     R15,DSARC               RC
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R0,R12,GPR@R0(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         WTOSSI                                             */
+*/*                                                                  */
+*/* Function:     WTO message listener routine                       */
+*/*                                                                  */
+*/* Input Regs:   R6  SSWT address                                   */
+*/*               R7  SSCT address                                   */
+*/*               R8  SSOB address                                   */
+*/*               R9  ZRWA address                                   */
+*/*               R11 ZSVT address                                   */
+*/*               R12 DSA  address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R6  SSWT address                                   */
+*/*               R7  SVCE address                                   */
+*/*               R8  SSOB address                                   */
+*/*               R9  ZRWA address                                   */
+*/*               R10 base address                                   */
+*/*               R11 ZSVT address                                   */
+*/*               R12 DSA  address                                   */
+*/*               R13 savearea address                               */
+*/*                                                                  */
+*/* Output Regs:  R15 Return code                                    */
+*/*               R0  Reason code                                    */
+*/*                                                                  */
+*/* Restrictions: WTO/R messages cannot be issued.                   */
+*/*                                                                  */
+*/* Note:         Listener routine receives control under any        */
+*/*               terminating address space.                         */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+WTOSSI   DS    0H
+         USING SSOBEXT,R6              SSWT
+         USING SSOB,R8
+         USING ZRWA,R9
+         USING ZSVT,R11
+         USING DSA,R12
+         B     12(,R15)
+*
+WTOID    DC    CL8'WTOSSI'             ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base address
+         USING WTOSSI,R10
+         LA    R1,DSARSSA              routine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         MVC   ZRWASECT,WTOID          ID
+         ZTRCE WTO=A,LINKAGE=LOCAL     trace
+*
+**       Activate recovery
+*
+         MVC   DSARSN,=AL4(RSN68)      set RSN
+         ZRETRY WTOEXIT,RSN=DSARSN     set retry address
+         ZTRCE WTO=B,LINKAGE=LOCAL     trace
+*
+**       Update listener entry count
+*
+WTO0000  DS    0H
+         L     R2,ZSVTWTOC             entry count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZSVTWTOC          update count
+         BNE   WTO0000                 changed: try again
+         MVC   ZSVTKEY0,DSAEKEY        save supervisor key
+         ZTRCE WTO=C,LINKAGE=LOCAL     trace
+*
+**       Prevent recursive WTO loop
+*
+         USING PSA,0
+         L     R1,PSATOLD              TCB address
+         L     R15,TCBRBP-TCB(,R1)     SVRB address
+         ICM   R15,7,RBLINKB-RBBASIC(R15) previous RB
+         CLR   R1,R15                  points to TCB?
+         BE    WTO0010                 yes, carry on
+         LA    R1,RBBASIC-RBINTCOD     offset to interrupt code
+         LNR   R1,R1                   make it negative
+         AL    R1,RBLINK-RBBASIC(,R15) point at RBINTCOD
+         LH    R1,0(,R1)               get interrupt code
+         CH    R1,=AL2(35)             recursive WTO issued?
+         BE    WTOEXIT                 yes, exit
+         ZTRCE WTO=D,LINKAGE=LOCAL     trace
+*
+**       Extract WTO message text
+*
+WTO0010  DS    0H
+         L     R6,SSWTWQE              WQE
+         USING WQE,R6
+         LA    R1,SSWTRTOK
+         ST    R1,SSOBRETN             RC
+         MVC   DSAWTOBF,WQETXT+1       copy msg text
+         CLC   IEF126I,DSAWTOBF        IEF126I?
+         BNE   WTO0020                 no
+         ZTRCE WTO=E,LINKAGE=LOCAL     trace
+         B     WTO0040
+*
+WTO0020  DS    0H
+         CLC   IEF404I,DSAWTOBF        IEF404I?
+         BNE   WTO0030                 no
+         ZTRCE WTO=F,LINKAGE=LOCAL     trace
+         B     WTO0040
+*
+WTO0030  DS    0H
+         CLC   $HASP395,DSAWTOBF       JES2 msg?
+         BNE   WTOEXIT                 no, exit
+         ZTRCE WTO=G,LINKAGE=LOCAL     trace
+*
+**       Check for SVC screening
+*
+WTO0040  DS    0H
+         L     R4,PSATOLD              TCB
+         USING TCB,R4
+         ICM   R7,15,TCBSVCA2          SVCE?
+         BNZ   WTO0050                 yes
+         ZTRCE WTO=H,LINKAGE=LOCAL     trace
+         B     WTOEXIT                 exit
+*
+WTO0050  DS    0H
+         USING SVCE,R7
+         CLC   SVCEID,=CL4'SVCE'       SVCE?
+         BE    WTO0060                 yes
+         ZTRCE WTO=I,LINKAGE=LOCAL     trace
+         B     WTOEXIT                 exit
+*
+**       Deactivate SVC screening
+*
+WTO0060  DS    0H
+         NI    TCBFLGS7,XFF-TCBSVCS    deactivate screening
+         NI    TCBFLGS7,XFF-TCBSVCSP   reset attach propagation
+         ZTRCE WTO=K,LINKAGE=LOCAL     trace
+*
+WTOEXIT  DS    0H
+         L     R15,DSARC               RC
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R0,R12,GPR@R0(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0C
+IEF125I  DC    CL7'IEF125I'            LOGGED ON
+IEF126I  DC    CL7'IEF126I'            LOGGED OFF
+IEF403I  DC    CL7'IEF403I'            STARTED
+IEF404I  DC    CL7'IEF404I'            ENDED
+$HASP373 DC    CL8'$HASP373'           STARTED
+$HASP395 DC    CL8'$HASP395'           ENDED
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        INISVC                                              */
+*/*                                                                  */
+*/* Function:    SVC screening initialization subroutine             */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R6  STAB address                                    */
+*/*              R7  SVCE address                                    */
+*/*              R8  ZPAR address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/* Note:        Service routine runs under the initiator jobstep    */
+*/*              task TCB (IEFIIC/IEFSD060).                         */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+INISVC   DS    0H
+         USING ZRWA,R9
+         USING ZSVT,R11
+         USING DSA,R12
+         B     12(,R15)
+*
+INISID   DC    CL8'INISVC'             ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base address
+         USING INISVC,R10
+         LA    R1,DSASSSA              subroutine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         MVC   ZRWASECT,INISID         ID
+         MVC   DSARC,=AL4(RC4)         initial RC
+         ZTRCE SSI=A,LINKAGE=BRANCH    trace
+*
+**       Initialize SVC screening
+*
+         USING PSA,0
+         L     R4,PSATOLD              TCB
+         USING TCB,R4
+         TM    DSAFLG1,DSA@LSMF        SMF=Y option?
+         BZ    INIS000                 no
+         TM    ZSVTFLG2,ZSVT@SMF       init parm specified?
+         BNZ   INIS000                 yes
+         ZWTO  MID=ZRMS98E
+         B     INISEXIT                exit
+*
+**       Init current instance SVCETAB
+*
+INIS000  DS    0H
+         ICM   R6,15,DSASTABA          STAB?
+         BNZ   INIS010                 yes
+         ZWTO  MID=ZRMS72E,V1==CL4'STAB'
+         B     INISEXIT                exit
+*
+INIS010  DS    0H
+         USING STAB,R6
+         ICM   R7,15,STABSVCE          SVCE?
+         BNZ   INIS020                 yes
+         ZWTO  MID=ZRMS72E,V1==CL4'SVCE'
+         B     INISEXIT                exit
+*
+INIS020  DS    0H
+         USING SVCE,R7
+         SPKA  0(0)
+         LA    R2,DSASVCET             local SVCETAB
+         LR    R0,R7                   LSQA table
+         LA    R1,SVCE@TBZ             SVCETAB length
+         LR    R3,R1                   copy length
+         MVCL  R0,R2                   relocate table
+         LA    R1,SVCE@TBZ
+         ST    R1,SVCESIZE             save length
+         ST    R7,ZSVTSVCE             LSQA table
+         ST    R11,SVCESVTA            ZSVT
+         L     R8,DSAZPARA             ZPAR address
+         USING ZPAR,R8
+*
+**       Set entry attributes
+*
+         LA    R3,SVCETAB              SVC entry
+         USING SVCENTRY,R3
+         OI    SVCEP,SVCAMODE          AMODE=31
+         MVI   SVCTP,SVCTP34           T3 SVC
+         OI    SVCTP,SVCNP             non-preemptive SVC
+         MVI   SVCLOCKS,SVCLL          LOCAL lock needed
+         ZTRCE SSI=B,LINKAGE=LOCAL     trace
+         DROP  R3
+*
+**       Capture environment data
+*
+         MVC   SVCEID,=CL4'SVCE'       ID
+         MVC   SVCESTCB,PSATOLD        init INITiator TCB
+         MVC   SVCESUBN,ZSVTSUBN       init subsystem name
+         MVC   SVCESTAB,ZSVTSTAB       init STAB address
+         MVC   SVCESVCA,ZPARSVC        copy SVC list
+         MVC   SVCELDDN,DSADDNAM       init MONLOG DDname
+         ZTRCE SSI=C,LINKAGE=LOCAL     trace
+*
+**       Capture address space data
+*
+         MVC   SVCEGDDN,DSAAGDDN       init SUBSYS DD name
+         MVC   SVCEJOBN,DSAGJBNM       init JOBname
+         MVC   SVCEJTYP,DSAASTYP       init job type
+         MVC   SVCESYSN,ZSVTSYSN       init SID
+         MVC   SVCEVMID,ZSVTVMID       init VMID
+         MVC   SVCELPAR,ZSVTLPAR       init LPAR
+         ZTRCE SSI=D,LINKAGE=LOCAL     trace
+*
+**       Set RPT={D|S} report option
+*
+         MVI   SVCELRPT,C'S'           set RPT=S default
+         NI    SVCEFLG2,XFF-SVCE@RPT   set indicator
+         TM    DSAFLG1,DSA@LRPT        RPT=D option?
+         BZ    INIS025                 no
+         MVI   SVCELRPT,C'D'           set RPT=D option
+         OI    SVCEFLG2,SVCE@RPT       set indicator
+         ZTRCE SSI=E,LINKAGE=LOCAL     trace
+*
+**       Set RUN={S|J} persist option
+*
+INIS025  DS    0H
+         MVI   SVCELRUN,C'S'           set RUN=S (EOT)
+         NI    SVCEFLG2,XFF-SVCE@RUN   set indicator
+         TM    DSAFLG1,DSA@LRUN        RUN=S option?
+         BZ    INIS030                 yes
+         MVI   SVCELRUN,C'J'           set RUN=J (EOJ)
+         OI    SVCEFLG2,SVCE@RUN       set indicator
+         ZTRCE SSI=F,LINKAGE=LOCAL     trace
+*
+**       Set SMF={Y|N} report option
+*
+INIS030  DS    0H
+         MVI   SVCELSMF,C'N'           set SMF=N default
+         NI    SVCEFLG2,XFF-SVCE@SMF   set indicator
+         TM    DSAFLG1,DSA@LSMF        SMF=Y option?
+         BZ    INIS035                 no
+         MVI   SVCELSMF,C'Y'           set SMF=Y option
+         OI    SVCEFLG2,SVCE@SMF       set indicator
+         ZTRCE SSI=G,LINKAGE=LOCAL     trace
+*
+**       Init current instance SMFTAB
+*
+INIS035  DS    0H
+         ICM   R2,15,STABSMF           SMFT?
+         BNZ   INIS040                 yes
+         ZWTO  MID=ZRMS72E,V1==CL4'SMFT'
+         B     INISEXIT                exit
+*
+INIS040  DS    0H
+         USING SMFT,R2
+         ST    R2,SVCESMFT             LSQA table
+         XC    SMFT(SMFT@SZE),SMFT     clear it
+         MVC   SMFTID,=CL4'SMFT'       ID
+         MVC   SMFTHDR,=AL2(-1)        ID2
+         MVC   SMFTRMAX,SMFESLOT       max record size
+         MVC   SMFTSREC,=AL4(SMFT@HDR) record header size
+*
+**       Initialize SMF record header
+*
+         TIME  BIN
+         ST    R0,SMFTTIME             time
+         ST    R1,SMFTDATE             date
+         MVI   SMFTFLG,X'02'           VS2 flag
+         MVC   SMFTSID,ZSVTSYSN        system ID
+         MVC   SMFTYPE,ZSVTSMFN        SMF=nnn record number
+         MVC   SMFTLEN,=AL4(SMFT@HDR)  audit data section length
+*
+**       Initialize audit data section
+*
+         MVC   SMFTSUB,ZSVTSUBN        subsystem name
+         MVC   SMFTJOB,DSAGJBNM        job name
+         MVC   SMFTSMFN,=AL2(1)        SMFE inuse count
+         MVC   SMFTSMFE,=AL2(SMFE@SZE) SMFE record length
+         MVC   SMFTVER,=CL8'&REL'      subsystem version
+         MVC   SMFTSTEP,=CL8'*UNKNOWN' step name
+*
+**       Initialize audit data subsection
+*
+         LA    R5,SMFT@SZE(,R2)        1st SMFE slot
+         USING SMFE,R5
+         XC    SMFE(SMFE@SZE),SMFE     clear it
+         ST    R5,SMFTFRST             first record slot
+         ST    R5,SMFTFREE             free record slot
+         L     R3,SMFESLOT             total SMFE slot size
+         LA    R3,0(R3,R2)             last SMFE slot address
+         ST    R3,SMFTLAST             set last SMFE entry slot
+         OI    SVCEFLG2,SVCE@SMT       SMFTAB created
+         ZTRCE SSI=H,LINKAGE=LOCAL     trace
+         DROP  R2,R5
+*
+**       Init current instance SVCNTAB
+*
+INIS045  DS    0H
+         ICM   R0,15,STABSVCN          SVCN?
+         BNZ   INIS050                 yes
+         ZWTO  MID=ZRMS72E,V1==CL4'SVCN'
+         B     INISEXIT                exit
+*
+INIS050  DS    0H
+         ST    R0,SVCESVNA             save it
+         ST    R0,ZSVTSVNA             (debug only)
+         L     R3,=AL4(SVCN@TBL)       length
+         LR    R1,R3                   copy length
+         L     R2,=V(SVCNTAB)          common table
+         MVCL  R0,R2                   relocate SVCNTAB
+         ZTRCE SSI=I,LINKAGE=LOCAL     trace
+*
+**       Check subpool log option
+*
+         TM    ZPARFLG1,ZPAR@SPN       SP= specified?
+         BNZ   INIS055                 yes
+         XC    SVCESPNA,SVCESPNA       zero SPNTAB address
+         ZTRCE SSI=J,LINKAGE=LOCAL     trace
+         B     INIS065
+*
+**       Init current instance SPNTAB
+*
+INIS055  DS    0H
+         ICM   R0,15,STABSPN           SPN?
+         BNZ   INIS060                 yes
+         ZWTO  MID=ZRMS72E,V1==CL4'SPN'
+         B     INISEXIT                exit
+*
+INIS060  DS    0H
+         ST    R0,SVCESPNA             LSQA table
+         LA    R3,SPN@TABL             length
+         LR    R1,R3                   length
+         LA    R2,DSASPNTB             local table
+         MVCL  R0,R2                   relocate SPNTAB
+         MVC   SVCESPDA,ZPARSP         copy subpool list
+         OI    SVCEFLG2,SVCE@SPN       SPNTAB created
+*
+**       Init current instance LGXE
+*
+INIS065  DS    0H
+         ICM   R3,15,DSALGXEA          LGXE?
+         BNZ   INIS070                 yes
+         ZWTO  MID=ZRMS72E,V1==CL4'LGXE'
+         B     INISEXIT                exit
+*
+INIS070  DS    0H
+         USING LGXE,R3
+         CLC   LGXEID,=CL4'LGXE'       LGXE?
+         BE    INIS080                 yes
+         DROP  R3
+         ZWTO  MID=ZRMS72E,V1==CL4'LGXE'
+         B     INISEXIT                exit
+*
+INIS080  DS    0H
+         ST    R3,SVCELGXE             set instance LGXE
+         ST    R3,ZSVTLGXE             (debug only)
+         OI    SVCEFLG2,SVCE@LGX       LGXE initialized
+         ZTRCE SSI=K,LINKAGE=LOCAL     trace
+*
+**       Check SVC disable option
+*
+         TM    DSAFLG1,DSA@SUNA        disallow SVC?
+         BZ    INIS099                 no
+         OI    SVCEFLG2,SVCE@DIS       set disallow indicator
+         ZTRCE SSI=L,LINKAGE=LOCAL     trace
+*
+**       Override restricted SVCs
+*
+INIS099  DS    0H
+         MVI   SVCE3,OVERRIDE          never screen EXIT
+         MVI   SVCE13,OVERRIDE         never screen ABEND
+         MVI   SVCE35,OVERRIDE         never screen WTO/R
+         MVI   SVCE51,OVERRIDE         never screen SDUMP/X
+         MVI   SVCE83,OVERRIDE         never screen E/SMFWTM
+         MVI   SVCE109,OVERRIDE        never screen ESR SVC
+         MVI   SVCE116,OVERRIDE        never screen ESR SVC
+         MVI   SVCE122,OVERRIDE        never screen ESR SVC
+         MVI   SVCE137,OVERRIDE        never screen ESR SVC
+*
+**       Override audit server SVC
+*
+         XR    R1,R1
+         IC    R1,ZSVTSVCN             audit server SVC
+         LA    R3,SVCETABE             SVC table
+         LA    R3,0(R1,R3)             SVC number slot
+         MVI   0(R3),OVERRIDE          never screen
+         ZTRCE SSI=M,LINKAGE=LOCAL     trace
+*
+**       ID address space instance
+*
+         L     R3,PSAAOLD              ASCB
+         USING ASCB,R3
+         L     R3,ASCBASSB             ASSB
+         USING ASSB,R3
+         MVC   SVCESTKN,ASSBSTKN       copy STOKEN
+         DROP  R3
+         ZTRCE SSI=N,LINKAGE=LOCAL     trace
+*
+**       Activate SVC screening
+*
+         ST    R7,TCBSVCA2             set screening table
+         OI    TCBFLGS7,TCBSVCS        activate screening
+         OI    TCBFLGS7,TCBSVCSP       set attach propagation
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+         ZTRCE SSI=O,LINKAGE=LOCAL     trace
+*
+INISEXIT DS    0H
+         L     R2,DSAEKEY              caller protect key
+         SPKA  0(2)                    restore key
+         L     R15,DSARC               RC
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R0,R12,GPR@R0(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+SMFTSIZE DC    AL4(&SMFTBZ)            SMFTAB table size
+SMFESLOT DC    AL4(&SMFTBZ-SMFE@SZE)   total SMFE entry slots
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        TRMSVC                                              */
+*/*                                                                  */
+*/* Function:    SVC screening termination subroutine                */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  SVCE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+TRMSVC   DS    0H
+         USING ZRWA,R9
+         USING ZSVT,R11
+         USING DSA,R12
+         B     12(,R15)
+*
+TRMSID   DC    CL8'TRMSVC'             ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base address
+         USING TRMSVC,R10
+         LA    R1,DSASSSA              subroutine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         MVC   ZRWASECT,TRMSID         ID
+         ZTRCE SSI=P,LINKAGE=BRANCH    trace
+*
+**       Obtain LOCAL lock
+*
+         SPKA  0(0)
+         SETLOCK OBTAIN,TYPE=LOCAL,REGS=USE,MODE=UNCOND,               +
+               RELATED=('Serialize TCB chain')
+*
+**       Locate top TCB address
+*
+         USING PSA,0
+         L     R4,PSAAOLD              ASCB
+         USING ASCB,R4
+         L     R4,ASCBASXB             ASXB
+         USING ASXB,R4
+         L     R4,ASXBFTCB             top TCB
+         USING TCB,R4
+*
+**       Deactivate SVC screening
+*
+TRMS000  DS    0H
+         NI    TCBFLGS7,XFF-TCBSVCS    deactivate screening
+         NI    TCBFLGS7,XFF-TCBSVCSP   reset attach propagation
+         XC    TCBSVCA2,TCBSVCA2       zero table address
+         ICM   R4,15,TCBTCB            more TCBs?
+         BNZ   TRMS000                 yes
+         ZTRCE SSI=Q,LINKAGE=LOCAL     trace
+*
+**       Release LOCAL lock
+*
+         SETLOCK RELEASE,TYPE=LOCAL,REGS=USE,                          +
+               RELATED=('Release TCB chain serialization')
+*
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+         ZTRCE SSI=R,LINKAGE=BRANCH    trace
+*
+TRMSEXIT DS    0H
+         L     R2,DSAEKEY              caller protect key
+         SPKA  0(2)                    restore key
+         L     R15,DSARC               RC
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R0,R12,GPR@R0(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        CRESTAB                                             */
+*/*                                                                  */
+*/* Function:    Create STAB tables nested subroutine                */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  STOK address                                    */
+*/*              R6  STAB address                                    */
+*/*              R7  SSCT address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+CRESTAB  DS    0H
+         USING ZRWA,R9
+         USING ZSVT,R11
+         USING DSA,R12
+         B     12(,R15)
+CRESID   DC    CL8'CRESTAB'            ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base address
+         USING CRESTAB,R10
+         LA    R1,DSASSSA              subroutine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         XC    DSARC,DSARC             RC
+         MVC   ZRWASECT,CRESID         ID
+*
+**       Retrieve STAB table token
+*
+         USING PSA,0
+         L     R3,FLCCVT
+         USING CVT,R3
+         L     R15,CVTCSRT             CSR table
+         L     R15,X'014'(,R15)        Name/Token vector
+         L     R15,X'008'(,R15)        IEANTRT
+         LA    R5,DSASTOKT             token workarea
+         USING STOK,R5
+         L     R7,DSASSCT              SSCT
+         USING SSCT,R7
+         MVC   STOKNAME,=CL16'&STABTK' token name
+         MVC   STOKSUBN,SSCTSNAM       complete token name
+         CALL  (R15),(STOKLEVL,STOKNAME,STOKDATA,DSARC),               +
+               MF=(E,DSAPLST)
+         CLC   DSARC,=AL4(IEANT_OK)    found?
+         BE    CRES000                 yes
+         CLC   DSARC,=AL4(IEANT_NOT_FOUND)
+         BE    CRES100                 not found
+         ZWTO  MID=ZRMS07E,V1=STOKNAME,V2==CL8'retrieve',V3=DSARC
+         B     CRESEXIT                exit
+         DROP  R3
+*
+**       Validity check instance
+*
+CRES000  DS    0H
+         XC    DSASTABA,DSASTABA       zero STAB address
+         XC    DSALGXEA,DSALGXEA       zero LGXE address
+         ICM   R6,15,STOKSTAB          STAB?
+         BNZ   CRES010                 yes
+         MVC   DSARC,=AL4(RC8)         RC
+         ZTRCE ALO=0,LINKAGE=BRANCH    trace
+         ZWTO  MID=ZRMS72E,V1==CL4'STAB'
+         B     CRES900                 error
+*
+CRES010  DS    0H
+         USING STAB,R6
+         CLC   STABID,=CL4'STAB'       STAB?
+         BE    CRES020                 yes
+         MVC   DSARC,=AL4(RC8)         RC
+         ZTRCE ALO=1,LINKAGE=BRANCH    trace
+         ZWTO  MID=ZRMS72E,V1==CL4'STAB'
+         B     CRES900                 error
+*
+CRES020  DS    0H
+         ST    R6,DSASTABA             STAB address
+         MVC   DSASTABZ,STABSIZE       STAB size
+         CLC   STABITKN,ZSVTITKN       same instance?
+         BNE   CRES050                 no
+         ICM   R4,15,STOKLGXE          LGXE?
+         BNZ   CRES030                 yes
+         MVC   DSARC,=AL4(RC8)         RC
+         ZWTO  MID=ZRMS72E,V1==CL4'LGXE'
+         ZTRCE ALO=2,LINKAGE=BRANCH    trace
+         B     CRES900                 error
+*
+CRES030  DS    0H
+         USING LGXE,R4
+         CLC   LGXEID,=CL4'LGXE'       LGXE?
+         BE    CRES040                 yes
+         MVC   DSARC,=AL4(RC8)         RC
+         ZWTO  MID=ZRMS72E,V1==CL4'LGXE'
+         B     CRES900                 error
+*
+CRES040  DS    0H
+         XC    LGXERECS,LGXERECS       zero record count
+         MVC   DSASTABA,STOKSTAB       copy STAB addree
+         MVC   DSALGXEA,STOKLGXE       copy LGXE address
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+         ZTRCE ALO=3,LINKAGE=BRANCH    trace
+         B     CRESEXIT                exit
+         DROP  R4
+*
+**       Storage release previous LGXE entry
+*
+CRES050  DS    0H
+         ICM   R4,15,STOKLGXE          LGXE?
+         BZ    CRES060                 no
+         USING LGXE,R4
+         L     R3,LGXESIZE             size
+         L     R2,DSAEKEY              entry key
+         STORAGE RELEASE,COND=YES,KEY=(2),                             +
+               SP=230,ADDR=(4),LENGTH=(3),LINKAGE=SYSTEM
+         LTR   R15,R15
+         BZ    CRES060
+         ZWTO  MID=ZRMS84E,                                            +
+               V1==CL8'LGXE',V2==CL7'RELEASE',V3=DSARC
+         ZTRCE ALO=4,LINKAGE=BRANCH    trace
+         DROP  R4
+*
+**       Page free previous STAB table
+*
+CRES060  DS    0H
+         LA    R3,4095(,R6)            1st 4K only
+         SPKA  0(0)
+         PGSER R,FREE,A=(6),EA=(3),ECB=0
+         L     R2,DSAEKEY              entry key
+         SPKA  0(2)
+*
+**       Storage release previous STAB table
+*
+         L     R3,STABSIZE             size
+         L     R2,DSAEKEY              entry key
+         STORAGE RELEASE,COND=YES,KEY=(2),                             +
+               SP=230,ADDR=(R6),LENGTH=(3),LINKAGE=SYSTEM
+         LTR   R15,R15
+         BZ    CRES070
+         ZWTO  MID=ZRMS84E,                                            +
+               V1==CL8'STAB',V2==CL7'RELEASE',V3=DSARC
+         ZTRCE ALO=5,LINKAGE=BRANCH    trace
+         DROP  R6
+*
+**       Delete STAB table token
+*
+CRES070  DS    0H
+         L     R3,FLCCVT
+         USING CVT,R3
+         L     R15,CVTCSRT             CSR table
+         L     R15,X'014'(,R15)        Name/Token vector
+         L     R15,X'00C'(,R15)        IEANTDL
+         MVC   STOKNAME,=CL16'&STABTK' token name
+         MVC   STOKSUBN,SSCTSNAM       complete token name
+         CALL  (R15),(STOKLEVL,STOKNAME,DSARC),MF=(E,DSAPLST)
+         CLC   DSARC,=AL4(IEANT_OK)    deleted?
+         BE    CRES100                 yes
+         ZWTO  MID=ZRMS07E,V1=STOKNAME,V2==CL8'delete',V3=DSARC
+         B     CRESEXIT                error
+         DROP  R3
+*
+**       Storage obtain current STAB table
+*
+CRES100  DS    0H
+         L     R3,TABLSIZE             STAB size
+         LA    R3,4095(,R3)            round,
+         N     R3,=XL4'FFFFF000'       to page boundary
+         ST    R3,DSASTABZ             save it
+         L     R2,DSAEKEY              entry key
+         STORAGE OBTAIN,LENGTH=(3),KEY=(2),                            +
+               SP=230,COND=YES,LOC=ANY,BNDRY=PAGE,LINKAGE=SYSTEM
+         ST    R15,DSARC
+         LTR   R15,R15                 successful?
+         BZ    CRES110                 yes
+         ZWTO  MID=ZRMS84E,                                            +
+               V1==CL8'STAB',V2==CL7'OBTAIN',V3=DSARC
+         B     CRES900                 exit
+*
+**       Page fix current STAB table
+*
+CRES110  DS    0H
+         LR    R6,R1                   STAB
+         USING STAB,R6
+         LA    R3,4095(,R6)            1st 4K only
+         SPKA  0(0)
+         PGSER R,FIX,A=(6),EA=(3),ECB=0
+         L     R2,DSAEKEY              entry key
+         SPKA  0(2)
+*
+**       Initialize current STAB table
+*
+         LR    R2,R6                   copy address
+         XR    R15,R15                 zero
+         L     R3,DSASTABZ             table size
+         MVCL  R2,R14
+         ST    R6,DSASTABA             STAB address
+         SPKA  0(0)
+         ST    R6,ZSVTSTAB             (debug only)
+         L     R2,DSAEKEY
+         SPKA  0(2)
+         XC    STAB(STAB@SZE),STAB
+         MVC   STABID,=CL4'STAB'       ID
+         MVC   STABSIZE,DSASTABZ       table size
+         MVC   STABITKN,ZSVTITKN       instance token
+         LA    R3,STABDATA
+         ST    R3,STABSVCE             SVCETAB
+         AL    R3,=AL4(SVCE@TBZ)
+         ST    R3,STABSVCN             SVCNTAB
+         AL    R3,=AL4(SVCN@TBL)
+         ST    R3,STABSPN              SPNTAB
+         AL    R3,=AL4(SPN@TABL)
+         ST    R3,STABSMF              SMFTAB
+         OI    STABFLG1,STAB@INI       STAB initialized
+         DROP  R6
+*
+**       Storage obtain current LGXE entry
+*
+         LA    R3,LGXE@SZE             LGXE size
+         ST    R3,DSALGXEZ             save it
+         L     R2,DSAEKEY              entry key
+         STORAGE OBTAIN,LENGTH=(3),KEY=(2),                            +
+               SP=230,COND=YES,LOC=24,LINKAGE=SYSTEM
+         ST    R15,DSARC
+         LTR   R15,R15                 successful?
+         BZ    CRES200                 yes
+         ZWTO  MID=ZRMS84E,                                            +
+               V1==CL8'LGXE',V2==CL7'OBTAIN',V3=DSARC
+         B     CRES900                 exit
+*
+**       Initialize current LGXE entry
+*
+CRES200  DS    0H
+         LR    R4,R1                   LGXE
+         ST    R4,DSALGXEA             LGXE address
+         USING LGXE,R4
+         XC    LGXE(LGXE@SZE),LGXE     scrub it
+         MVC   LGXEID,=CL4'LGXE'       ID
+         MVC   LGXEDID,=CL4'DCB'       ID
+         MVC   LGXEOLFM,SVCOLFM        open listform
+         MVC   LGXECLFM,SVCCLFM        close listform
+         MVC   LGXELOGR,ZSVTBLKS       clear log record
+         MVC   LGXEDCB(LGXEDCBL),MONLOG relocate DCB
+         DROP  R4
+*
+**       Create STAB table token
+*
+         L     R3,FLCCVT
+         USING CVT,R3
+         L     R15,CVTCSRT             CSR table
+         L     R15,X'014'(,R15)        Name/Token vector
+         L     R15,X'004'(,R15)        IEANTCR
+         MVC   STOKNAME,=CL16'&STABTK' token name
+         MVC   STOKSUBN,SSCTSNAM       complete token name
+         MVC   STOKSTAB,DSASTABA       STAB address
+         MVC   STOKLGXE,DSALGXEA       LGXE address
+         CALL  (R15),(STOKLEVL,STOKNAME,STOKDATA,STOKPERS,DSARC),      +
+               MF=(E,DSAPLST)
+         CLC   DSARC,=AL4(IEANT_OK)    successful?
+         BE    CRES300                 yes
+         ZWTO  MID=ZRMS07E,V1=STOKNAME,V2==CL8'create',V3=DSARC
+         B     CRES900                 error
+         DROP  R3
+*
+**       STAB storage table created
+*
+CRES300  DS    0H
+         OI    DSAFLG2,DSA@CSTO        token created
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+         ZTRCE ALO=6,LINKAGE=BRANCH    trace
+         B     CRESEXIT                exit
+*
+**       Storage release LGXE entry
+*
+CRES900  DS    0H
+         ICM   R4,15,DSALGXEA          LGXE?
+         BZ    CRES910                 no
+         XC    DSALGXEA,DSALGXEA
+         L     R3,DSALGXEZ             LGXE size
+         L     R2,DSAEKEY              entry key
+         STORAGE RELEASE,COND=YES,KEY=(2),                             +
+               SP=230,ADDR=(R4),LENGTH=(3),LINKAGE=SYSTEM
+         LTR   R15,R15
+         BZ    CRES910
+         ZWTO  MID=ZRMS84E,                                            +
+               V1==CL8'LGXE',V2==CL7'RELEASE',V3=DSARC
+         ZTRCE ALO=7,LINKAGE=BRANCH    trace
+*
+**       Page free STAB table
+*
+CRES910  DS    0H
+         ICM   R4,15,DSASTABA          STAB?
+         BZ    CRES920                 no
+         XC    DSASTABA,DSASTABA
+         LA    R3,4095(,R4)            1st 4k only
+         SPKA  0(0)
+         PGSER R,FREE,A=(4),EA=(3),ECB=0
+         L     R2,DSAEKEY              entry key
+         SPKA  0(2)
+*
+**       Storage release STAB table
+*
+         L     R3,DSASTABZ             size
+         L     R2,DSAEKEY              entry key
+         STORAGE RELEASE,COND=YES,KEY=(2),                             +
+               SP=230,ADDR=(R4),LENGTH=(3),LINKAGE=SYSTEM
+         LTR   R15,R15
+         BZ    CRES920
+         ZWTO  MID=ZRMS84E,                                            +
+               V1==CL8'STAB',V2==CL7'RELEASE',V3=DSARC
+         ZTRCE ALO=8,LINKAGE=BRANCH    trace
+*
+**       Delete STAB table token
+*
+CRES920  DS    0H
+         L     R3,FLCCVT
+         USING CVT,R3
+         L     R15,CVTCSRT             CSR table
+         L     R15,X'014'(,R15)        Name/Token vector
+         L     R15,X'00C'(,R15)        IEANTDL
+         MVC   STOKNAME,=CL16'&STABTK' token name
+         MVC   STOKSUBN,SSCTSNAM       complete token name
+         CALL  (R15),(STOKLEVL,STOKNAME,DSARC),MF=(E,DSAPLST)
+         CLC   DSARC,=AL4(IEANT_OK)    deleted?
+         BE    CRES999                 yes
+         CLC   DSARC,=AL4(IEANT_NOT_FOUND)
+         BE    CRES999                 not found
+         ZWTO  MID=ZRMS07E,V1=STOKNAME,V2==CL8'delete',V3=DSARC
+         DROP  R3
+*
+CRES999  DS    0H
+         ZTRCE ALO=9,LINKAGE=BRANCH    trace
+*
+CRESEXIT DS    0H
+         L     R2,DSAEKEY              caller protect key
+         SPKA  0(2)                    restore key
+         L     R15,DSARC               RC
+         L     R0,DSARSN               RSN
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R1,R12,GPR@R1(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+STOKLEVL DC    AL4(IEANT_HOME_LEVEL)
+STOKPERS DC    AL4(IEANT_NOPERSIST)
+TABLSIZE DC    AL4(STAB@SZE+SVCE@TBZ+SVCN@TBL+SPN@TABL+&SMFTBZ)
+         DS    0F
+SVCOLFM  OPEN  (,),MODE=31,MF=L        OPEN listform
+SVCCLFM  CLOSE (,),MODE=31,MF=L        CLOSE listform
+         DS    0F
+MONLOG   DCB   DDNAME=MONLOG,DSORG=PS,LRECL=80,MACRF=PM
+MONLOGL  EQU   *-MONLOG
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        SVCPRO                                              */
+*/*                                                                  */
+*/* Function:    Process SVC audit list routine                      */
+*/*                                                                  */
+*/* Input Regs:  R7  SSCT address                                    */
+*/*              R8  SSOB address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  SVCE entry                                      */
+*/*              R8  ZPAR address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/* Note:        Service routine runs under the initiator jobstep    */
+*/*              task TCB (IEFIIC/IEFSD060).                         */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+SVCPRO   DS    0H
+         USING ZRWA,R9
+         USING ZSVT,R11
+         USING DSA,R12
+         B     12(,R15)
+*
+SVCPID   DC    CL8'SVCPRO'             ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base address
+         USING SVCPRO,R10
+         LA    R1,DSASSSA              subroutine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         MVC   ZRWASECT,SVCPID         ID
+         ZTRCE PAR=0,LINKAGE=BRANCH    trace
+*
+**       Copy SVC screen table locally
+*
+         LA    R2,DSASVCET             local SVCETAB table
+         LA    R3,SVCE@TBZ             SVCETAB length
+         L     R4,=V(SVCETAB)          common SVCETAB table
+         LA    R5,SVCE@TBZ             SVCETAB length
+         MVCL  R2,R4                   relocate SVCETAB
+         LA    R7,DSASVCET             local SVCETAB
+         USING SVCE,R7
+         L     R8,DSAZPARA             ZPAR address
+         USING ZPAR,R8
+         MVC   DSARC,=AL4(RC8)         initial RC
+*
+**       Process SVC list parmdata
+*
+SPRO000  DS    0H
+         MVC   DSARC,=AL4(RC8)         RC
+         ZCALL SR=ZPARSER,=CL4'&PARSVC'
+         LTR   R15,R15                 successful?
+         BZ    SPRO010                 yes
+         ZTRCE PAR=1,LINKAGE=BRANCH    trace
+         B     SPROXIT                 exit
+*
+SPRO010  DS    0H
+         MVI   ZPARSVCI,SVNX@SOK       screen default
+         XR    R2,R2
+         IC    R2,ZPARNSVC             SVC number
+         SLL   R2,5                    multiply it by 32
+         L     R3,=V(SVCNTAB)          SVCNTAB table
+         LA    R3,0(R2,R3)             analog entry address
+         USING SVNX,R3                 SVNX table entry
+         CLI   SVNXSVCI,SVNX@SNO       restricted SVC?
+         BNE   SPRO020                 no
+         MVI   ZPARSVCI,SVNX@SNO       donot screen SVC
+         ZWTO  MID=ZRMS94W,V1=ZPARSNUM show warning msg
+         ZTRCE PAR=2,LINKAGE=BRANCH    trace
+*
+SPRO020  DS    0H
+         CLC   ZSVTSVCN,ZPARNSVC       audit server SVC?
+         BNE   SPRO030                 no
+         MVI   ZPARSVCI,SVNX@SNO       do not screen server SVC
+         ZWTO  MID=ZRMS93W,V1=ZSVTSUBN,V2=ZSVTSVCD
+         ZTRCE PAR=3,LINKAGE=BRANCH    trace
+*
+SPRO030  DS    0H
+         LA    R3,SVCETABE             SVC table
+         XR    R2,R2
+         IC    R2,ZPARNSVC             SVC number
+         LA    R3,0(R2,R3)             SVC number slot
+         MVC   0(1,R3),ZPARSVCI        screen SVC
+         ZTRCE PAR=4,LINKAGE=BRANCH    trace
+*
+**       Audit getmain/freemain SVCs
+*
+         TM    ZPARWORK,ZPAR@WGM       getmain?
+         BZ    SPRO040                 no
+         MVI   SVCE4,SVNX@SOK          screen SVC-4
+         MVI   SVCE5,SVNX@SOK          screen SVC-5
+         MVI   SVCE10,SVNX@SOK         screen SVC=10
+         MVI   SVCE120,SVNX@SOK        screen SVC-120
+         ZTRCE PAR=5,LINKAGE=BRANCH    trace
+*
+SPRO040  DS    0H
+         L     R2,ZPARVCNT             SVC count
+         LA    R2,1(,R2)               add one
+         ST    R2,ZPARVCNT             update count
+         TM    ZPARFLG1,ZPAR@SVP       processing complete?
+         BZ    SPRO000                 no, loop
+*
+SPRO099  DS    0H
+         XC    DSARC,DSARC             RC
+         ZTRCE PAR=6,LINKAGE=BRANCH    trace
+*
+SPROXIT  DS    0H
+         L     R2,DSAEKEY              caller protect key
+         SPKA  0(2)                    restore key
+         L     R15,DSARC               RC
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R0,R12,GPR@R0(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        SPNPRO                                              */
+*/*                                                                  */
+*/* Function:    Process subpool audit list routine                  */
+*/*                                                                  */
+*/* Input Regs:  R7  SSCT address                                    */
+*/*              R8  SSOB address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  SPNX entry                                      */
+*/*              R8  ZPAR address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/* Note:        Service routine runs under the initiator jobstep    */
+*/*              task TCB (IEFIIC/IEFSD060).                         */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+SPNPRO   DS    0H
+         USING ZRWA,R9
+         USING ZSVT,R11
+         USING DSA,R12
+         B     12(,R15)
+*
+SPNPID   DC    CL8'SPNPRO'             ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base address
+         USING SPNPRO,R10
+         LA    R1,DSASSSA              subroutine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         MVC   ZRWASECT,SPNPID         ID
+         ZTRCE SPN=0,LINKAGE=BRANCH    trace
+*
+**       Copy SPNTAB locally
+*
+         LA    R2,DSASPNTB             local SPNTAB table
+         LA    R3,SPN@TABL             table length
+         L     R4,=V(SPNTAB)           common table address
+         LA    R5,SPN@TABL             table length
+         MVCL  R2,R4                   relocate table
+         L     R8,DSAZPARA             ZPAR address
+         USING ZPAR,R8
+         TM    ZPARFLG1,ZPAR@SPN       SP specified?
+         BNZ   SPNP000                 yes
+         ZTRCE SPN=1,LINKAGE=BRANCH    trace
+         B     SPNP099                 exit
+*
+**       Process SP list parmdata
+*
+SPNP000  DS    0H
+         MVC   DSARC,=AL4(RC8)         RC
+         ZCALL SR=ZPARSER,=CL4'&PARSPN'
+         LTR   R15,R15                 successful?
+         BZ    SPNP010                 yes
+         ZTRCE SPN=2,LINKAGE=BRANCH    trace
+         B     SPNPXIT                 exit
+*
+SPNP010  DS    0H
+         TM    ZPARWORK,ZPAR@WSP       SP number found?
+         BZ    SPNP020                 no
+         XR    R2,R2
+         IC    R2,ZPARNSPN             SP number
+         SLL   R2,2                    multiply by 4
+         LA    R7,DSASPNTB             local SPNTAB table
+         LA    R7,0(R2,R7)             point to SPNX entry
+         USING SPNX,R7
+         ST    R7,ZPARSPNX             current SPNX
+         MVI   SPNXACTN,SPN@LOG        set audit indicator
+         ZTRCE SPN=3,LINKAGE=BRANCH    trace
+         B     SPNP090                 carry on
+*
+SPNP020  DS    0H
+         TM    ZPARWORK,ZPAR@WNM       SP name found?
+         BNZ   SPNP030                 yes
+         ZWTO  MID=ZRMS82E,V1=ZPARSPNM
+         MVC   DSARC,=AL4(RC8)         RC
+         ZTRCE SPN=4,LINKAGE=BRANCH    trace
+         B     SPNPXIT                 exit
+*
+SPNP030  DS    0H
+         LA    R4,ZSUBSPN              SP analog table
+         USING ZSPN,R4
+         LA    R3,ZSUBSPNZ             number of entries
+*
+SPNP040  DS    0H
+         CLC   ZSPNSUBP,ZPARSPNM       SP name match?
+         BE    SPNP050                 yes
+         LA    R4,ZSPN@SZE(,R4)        next entry
+         BCT   R3,SPNP040              loop
+         ZWTO  MID=ZRMS82E,V1=ZPARSPNM
+         MVC   DSARC,=AL4(RC8)         RC
+         ZTRCE SPN=5,LINKAGE=BRANCH    trace
+         B     SPNPXIT                 exit
+*
+SPNP050  DS    0H
+         LA    R7,DSASPNTB             local SPNTAB table
+         LA    R3,SPN@TABE             SPNX entry count
+*
+SPNP060  DS    0H
+         CLC   ZPARSPNM,=CL4'ALL'      SP=ALL?
+         BE    SPNP070                 yes, set audit subpool
+         CLC   SPNXTYPE,ZSPNTYPE       SP type match?
+         BNE   SPNP080                 no
+         ZTRCE SPN=6,LINKAGE=BRANCH    trace
+*
+SPNP070  DS    0H
+         ST    R7,ZPARSPNX             current SPNX
+         MVI   SPNXACTN,SPN@LOG        set audit indicator
+         ZTRCE SPN=7,LINKAGE=BRANCH    trace
+*
+SPNP080  DS    0H
+         LA    R7,SPNX@SZE(,R7)        next SPNX entry
+         BCT   R3,SPNP060              loop
+         ZTRCE SPN=8,LINKAGE=BRANCH    trace
+*
+SPNP090  DS    0H
+         L     R2,ZPARSCNT             SP count
+         LA    R2,1(,R2)               add one
+         ST    R2,ZPARSCNT             update count
+         TM    ZPARFLG1,ZPAR@SPP       processing complete?
+         BZ    SPNP000                 no, loop
+*
+SPNP099  DS    0H
+         XC    DSARC,DSARC             RC
+         ZTRCE SPN=9,LINKAGE=BRANCH    trace
+*
+SPNPXIT  DS    0H
+         L     R2,DSAEKEY              caller protect key
+         SPKA  0(2)                    restore key
+         L     R15,DSARC               RC
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R0,R12,GPR@R0(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZSUBSPN  DS    0C                      ZSPN
+ZSQA     DC    AL1(SPNX@SQA),CL4'SQA'  subpool ID
+ZCSA     DC    AL1(SPNX@CSA),CL4'CSA'  subpool ID
+ZLSQA    DC    AL1(SPNX@LSQ),CL4'LSQA' subpool ID
+ZPVT     DC    AL1(SPNX@PVT),CL4'PVT'  subpool ID
+ZJST     DC    AL1(SPNX@JST),CL4'JST'  subpool ID
+ZALL     DC    AL1(SPNX@ALL),CL4'ALL'  subpool ID
+ZSUBSPEN EQU   *-ZALL                  SPN size
+ZSUBSPNZ EQU   (*-ZSUBSPN)/ZSPN@SZE    number of entries
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        OPTIONS                                             */
+*/*                                                                  */
+*/* Function:    Parse processing options subroutine                 */
+*/*                                                                  */
+*/* Input Regs:  R5  SSWA address                                    */
+*/*              R7  SSCT address                                    */
+*/*              R8  SSOB address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  SSWA address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/* Note:        Service routine runs under the initiator jobstep    */
+*/*              task TCB (IEFIIC/IEFSD060).                         */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+OPTIONS  DS    0H
+         USING SSWA,R5
+         USING ZRWA,R9
+         USING ZSVT,R11
+         USING DSA,R12
+         B     12(,R15)
+*
+OPTID    DC    CL8'OPTIONS'            ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base address
+         USING OPTIONS,R10
+         LA    R1,DSASSSA              subroutine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         MVC   ZRWASECT,OPTID          ID
+         MVC   DSARC,=AL4(RC4)         initial RC
+         ZTRCE ALO=S,LINKAGE=BRANCH    trace
+         IPK   ,                       caller key
+         ST    R2,DSACKEY              save it
+*
+**       Parse RPT={D|S} option
+*
+         LA    R3,DSAPARM              parmdata address
+         L     R2,DSAPARML             parmdata length
+*
+OPT0000  DS    0H
+         CLC   RPTID,0(R3)             RPT= specified?
+         BE    OPT0010                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,OPT0000              loop
+         MVI   DSAOPRPT,C'S'
+         NI    DSAFLG1,XFF-DSA@LRPT    set RPT=S (summary)
+         ZTRCE ALO=T,LINKAGE=BRANCH    trace
+         B     OPT0015
+*
+OPT0010  DS    0H
+         LA    R3,5(,R3)               skip ID
+         MVI   DSAOPRPT,C'D'
+         OI    DSAFLG1,DSA@LRPT        set RPT=D (summary)
+         CLI   0(R3),C'D'              RPT=D?
+         BE    OPT0015
+         MVI   DSAOPRPT,C'S'
+         NI    DSAFLG1,XFF-DSA@LRPT    set RPT=S (summary)
+         CLI   0(R3),C'S'
+         BE    OPT0015
+         ZWTO  MID=ZRMS97E,V1==CL8'RPT='
+         B     OPTEXIT                 exit
+*
+**       Parse RUN={S|J} option
+*
+OPT0015  DS    0H
+         LA    R3,DSAPARM              parmdata address
+         L     R2,DSAPARML             parmdata length
+*
+OPT0020  DS    0H
+         CLC   RUNID,0(R3)             RUN= specified?
+         BE    OPT0025                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,OPT0020              loop
+         MVI   DSAOPRUN,C'S'
+         NI    DSAFLG1,XFF-DSA@LRUN    set RUN=S default
+         ZTRCE ALO=U,LINKAGE=BRANCH    trace
+         B     OPT0035
+*
+OPT0025  DS    0H
+         LA    R3,5(,R3)               skip ID
+         CLI   0(R3),C'J'              RPT=J?
+         BNE   OPT0030                 no
+         MVI   0(R3),C'S'              set RPT=S
+         ZWTO  MID=ZRMS80W             issue warning msg
+*
+OPT0030  DS    0H
+         MVI   DSAOPRUN,C'S'
+         NI    DSAFLG1,XFF-DSA@LRUN    set RUN=S
+         CLI   0(R3),C'S'
+         BE    OPT0035
+         ZWTO  MID=ZRMS97E,V1==CL8'RUN='
+         B     OPTEXIT                 exit
+*
+**       Parse SMF={Y|N} option
+*
+OPT0035  DS    0H
+         LA    R3,DSAPARM              parmdata address
+         L     R2,DSAPARML             parmdata length
+*
+OPT0040  DS    0H
+         CLC   SMFID,0(R3)             SMF= specified?
+         BE    OPT0050                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,OPT0040              loop
+         MVI   DSAOPSMF,C'N'
+         NI    DSAFLG1,XFF-DSA@LSMF    set SMF=N default
+         ZTRCE ALO=V,LINKAGE=BRANCH    trace
+         B     OPT0060
+*
+OPT0050  DS    0H
+         LA    R3,5(,R3)               skip ID
+         MVI   DSAOPSMF,C'Y'
+         OI    DSAFLG1,DSA@LSMF        set SMF=Y indicator
+         CLI   0(R3),C'Y'              SMF=Y?
+         BE    OPT0060
+         MVI   DSAOPSMF,C'N'
+         NI    DSAFLG1,XFF-DSA@LSMF    set SMF=N indicator
+         CLI   0(R3),C'N'              SMF=N?
+         BE    OPT0060
+         ZWTO  MID=ZRMS97E,V1==CL8'SMF='
+         B     OPTEXIT                 exit
+*
+**       Display selected options
+*
+OPT0060  DS    0H
+         ZWTO  MID=ZRMS92I,                                            +
+               V1=DSAAGDDN,            show SUBSYS DDname              +
+               V2=DSADDNAM,            show log DDname                 +
+               V3=DSAOPRPT,            show RPT option                 +
+               V4=DSAOPRUN,            show RUN option                 +
+               V5=DSAOPSMF             show SMF option
+         XC    DSARC,DSARC             RC
+         ZTRCE ALO=Z,LINKAGE=BRANCH    trace
+*
+OPTEXIT  DS    0H
+         L     R2,DSACKEY              caller key
+         SPKA  0(2)                    restore key
+         L     R15,DSARC               RC
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R0,R12,GPR@R0(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0C
+RUNID    DC    CL5',RUN='
+RPTID    DC    CL5',RPT='
+SMFID    DC    CL5',SMF='
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        ASDATA                                              */
+*/*                                                                  */
+*/* Function:    Capture address space data nested-subroutine        */
+*/*                                                                  */
+*/* Input Regs:  R7  SSCT address                                    */
+*/*              R8  SSOB address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  SVCE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/* Note:        Service routine runs under the initiator jobstep    */
+*/*              task TCB (IEFIIC/IEFSD060).                         */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+ASDATA   DS    0H
+         USING ZRWA,R9
+         USING ZSVT,R11
+         USING DSA,R12
+         B     12(,R15)
+*
+ASNID    DC    CL8'ASDATA'             ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base address
+         USING ASDATA,R10
+         LA    R1,DSASSSA              subroutine savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         MVC   ZRWASECT,ASNID          ID
+         XC    DSARC,DSARC             RC
+         IPK   ,                       caller key
+         ST    R2,DSACKEY              save it
+*
+         USING PSA,0
+         L     R3,PSAAOLD              ASCB
+         USING ASCB,R3
+         ICM   R1,15,ASCBJBNS          STC?
+         BZ    ASND020                 no
+         CLC   0(8,R1),=CL8'INIT'      INIT?
+         BE    ASND020                 yes
+         MVC   DSAASNAM,0(R1)          copy ASname
+         ICM   R1,15,ASCBTSB           TSU?
+         BZ    ASND010                 no
+         MVC   DSAASTYP,=CL3'TSU'      copy AStype
+         B     ASNDEXIT                exit
+*
+ASND010  DS    0H
+         MVC   DSAASTYP,=CL3'STC'      copy AStype
+         B     ASNDEXIT                exit
+*
+ASND020  DS    0H
+         L     R1,ASCBJBNI             JOB name address
+         MVC   DSAASTYP,=CL3'JOB'      copy AStype
+         MVC   DSAASNAM,0(R1)          copy ASname
+*
+ASNDEXIT DS    0H
+         L     R2,DSACKEY              caller key
+         SPKA  0(2)                    restore key
+         L     R15,DSARC               RC
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R0,R12,GPR@R0(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        DDNAME                                              */
+*/*                                                                  */
+*/* Function:    Validity check DDname nested-subroutine             */
+*/*                                                                  */
+*/* Input Regs:  R5  SSWA address                                    */
+*/*              R7  SSCT address                                    */
+*/*              R8  SSOB address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  SSWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/* Note:        Service routine runs under the initiator jobstep    */
+*/*              task TCB (IEFIIC/IEFSD060).                         */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+DDNAME   DS    0H
+         USING SSWA,R5
+         USING ZSVT,R11
+         USING DSA,R12
+         B     12(,R15)
+*
+DDNID    DC    CL8'DDNAME'             ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base address
+         USING DDNAME,R10
+         LA    R1,DSASSSA              subroutine saveara
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         MVC   DSARC,=AL4(RC4)         initial RC
+         ZTRCE ALO=$,LINKAGE=BRANCH    trace
+         IPK   ,                       caller key
+         ST    R2,DSACKEY              save it
+*
+**       Locate monitor log DD name
+*
+         LA    R3,SSWAPREN             parm entry
+         USING SSWAIFLD,R3
+         LA    R1,8                    DD name length
+         LA    R2,SSWAIPRM             parmdata ptr
+         MVC   DSADDNAM,ZSVTBLKS       scrub DD name
+*
+DDN0000  DS    0H
+         CLI   0(R2),XZERO             enf-of-DD name?
+         BE    DDN0010                 yes
+         CLI   0(R2),BLANK             enf-of-DD name?
+         BE    DDN0010                 yes
+         CLI   0(R2),COMMA             end-of-DD name?
+         BE    DDN0010                 yes
+         LA    R2,1(,R2)               walk thru DD name
+         BCT   R1,DDN0000              loop
+         ZTRCE ALO=@,LINKAGE=BRANCH    trace
+*
+DDN0010  DS    0H
+         LA    R3,SSWAIPRM             parmdata ptr
+         CR    R3,R2                   DD name valid?
+         BNE   DDN0020                 yes
+         ZWTO  MID=ZRMS96E,V1==CL8'NULL-DD'
+         B     DDNEXIT                 exit
+         DROP  R3
+*
+DDN0020  DS    0H
+         SR    R2,R3                   get length
+         CH    R2,=H'8'                DD name valid?
+         BNH   DDN0030                 yes
+         MVC   DSADDBAD,0(R3)          copy DD name
+         ZWTO  MID=ZRMS96E,V1=DSADDNAM
+         B     DDNEXIT                 exit
+*
+DDN0030  DS    0H
+         BCTR  R2,0                    subtract one
+         EX    R2,COPYDDNM             copy DD name
+         LA    R2,1(,R2)
+         LA    R3,DSADDNAM
+         OC    DSADDNAM,ZSVTBLKS       uppercase
+         CLI   0(R3),C'0'              valid?
+         BNL   DDNERRO                 no
+*
+DDN0040  DS    0H
+         CLI   0(R3),C'$'              valid
+         BE    DDN0050                 yes
+         CLI   0(R3),C'#'              valid
+         BE    DDN0050                 yes
+         CLI   0(R3),C'@'              valid
+         BE    DDN0050                 yes
+*
+         CLI   0(R3),C'A'              valid
+         BL    DDNERRO                 no
+         CLI   0(R3),C'Z'              valid
+         BNH   DDN0050                 yes
+         CLI   0(R3),C'9'              valid
+         BH    DDNERRO                 no
+*
+DDN0050  DS    0H
+         LA    R3,1(,R3)
+         BCT   R2,DDN0040              loop
+         B     DDN0099                 all done
+*
+DDNERRO  DS    0H
+         MVC   DSADDBAD,0(R3)          copy DD name
+         ZWTO  MID=ZRMS96E,V1=DSADDBAD
+         B     DDNEXIT                 exit
+*
+DDN0099  DS    0H
+         XC    DSARC,DSARC             RC
+         ZTRCE ALO=#,LINKAGE=BRANCH    trace
+*
+DDNEXIT  DS    0H
+         L     R2,DSACKEY              caller key
+         SPKA  0(2)                    restore key
+         L     R15,DSARC               RC
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R0,R12,GPR@R0(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+COPYDDNM MVC   DSADDNAM(*-*),0(R3)
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        PARSER                                              */
+*/*                                                                  */
+*/* Function:    Parmdata parser service routine                     */
+*/*                                                                  */
+*/* Input Regs:  R1  FCID                                            */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  SVCE address                                    */
+*/*              R8  ZPAR address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZSVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/* Note:        Service routine runs under the initiator jobstep    &/
+*/*              task TCB (IEFIIC/IEFSD060).                         */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+ZPARSER  DS    0H
+         USING SVCE,R7
+         USING ZPAR,R8
+         USING ZRWA,R9
+         USING ZSVT,R11
+         USING DSA,R12
+         B     12(,R15)
+ZPARSID  DC    CL8'ZPARSER'            ID
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15                 base address
+         USING ZPARSER,R10
+         LR    R4,R1                   FCID
+         LA    R1,DSANSSA              nested savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         XC    DSARC,DSARC             RC
+         MVC   ZRWASECT,ZPARSID        ID
+         ZTRCE PAR=A,LINKAGE=BRANCH    trace
+*
+**       Obtain parser workarea
+*
+         CLC   =CL4'&PARINI',0(R4)     init request?
+         BNE   ZPAR200                 no
+         L     R2,DSAEKEY              caller protect key
+         STORAGE OBTAIN,LOC=ANY,COND=YES,                              +
+               LENGTH=DSA@SIZE,SP=230,KEY=(2),LINKAGE=SYSTEM
+         ST    R15,DSARC
+         LTR   R15,R15
+         BZ    ZPAR000
+         ZWTO  MID=ZRMS84E,                                            +
+               V1==CL8'ZPARSER',V2==CL7'OBTAIN',V3=DSARC
+         B     ZPARXIT                 error
+*
+**       Initialize parser workarea
+*
+ZPAR000  DS    0H
+         LR    R8,R1                   ZPAR
+         LA    R3,ZPAR@SZE             ZPAR size
+         LR    R2,R1                   copy address
+         XR    R15,R15                 zero
+         MVCL  R2,R14                  scrub ZPAR
+         ST    R8,DSAZPARA             save address
+*
+         MVC   ZPARID,=CL4'ZPAR'       ID
+         MVC   ZPARWK,=CL5'WORK='      ID
+         MVC   ZPARPID,=CL5'PARM='     ID
+         MVC   ZPARPAR1,DSADATA1       parmdata
+         MVC   ZPARPAR2,DSADATA2       parmdata
+*
+         MVC   ZPARSP,=CL3'SP='        ID
+         MVC   ZPARSPN1,ZSVTBLKS       subpool data
+         MVC   ZPARSPN2,ZSVTBLKS       subpool data
+*
+         MVC   ZPARSVC,=CL4'SVC='      ID
+         MVC   ZPARSVC1,ZSVTBLKS       SVC data
+         MVC   ZPARSVC2,ZSVTBLKS       SVC data
+         ZTRCE PAR=B,LINKAGE=BRANCH    trace
+*
+**       Validity check SVC= option
+*
+         LA    R6,DSAPARM              parmdata address
+         L     R5,DSAPARML             parmdate length
+*
+ZPAR010  DS    0H
+         CLC   =CL5',SVC=',0(R6)       SVC= keyword?
+         BE    ZPAR020                 yes
+         CLC   =CL5',DIS=',0(R6)       DIS= keyword?
+         BE    ZPAR020                 yes
+         LA    R6,1(,R6)               walk thu parmdata
+         BCT   R5,ZPAR010              loop
+         ZWTO  MID=ZRMS81E,                                            +
+               V1==CL46'SVC=/DIS= KEYWORD REQUIRED NOT SPECIFIED'
+         MVC   DSARC,=AL4(RC8)         error
+         B     ZPARXIT                 exit
+*
+**       Validity check parmdata
+*
+ZPAR020  DS    0H
+         LA    R3,CHARTAB              char table address
+         LA    R2,CHARTABN             char table entries
+*
+ZPAR030  DS    0H
+         LA    R6,DSAPARM              parmdata address
+         L     R5,DSAPARML             parmdate length
+*
+ZPAR040  DS    0H
+         CLC   0(1,R3),0(R6)           valid separator?
+         BE    ZPAR050                 no
+         LA    R6,1(,R6)               walk thru parmdata
+         BCT   R5,ZPAR040              loop
+         LA    R3,1(,R3)               walk thry char table
+         BCT   R2,ZPAR030              loop
+         ZTRCE PAR=C,LINKAGE=BRANCH    trace
+         B     ZPAR060
+*
+ZPAR050  DS    0H
+         MVC   ZPARSEPE,0(R6)          invalid separator
+         MVC   DSARC,=AL4(RC8)         error
+         ZWTO  MID=ZRMS87E,V1=ZPARSEPE
+         B     ZPARXIT                 exit
+*
+**       Parse SVC= parmdata
+*
+ZPAR060  DS    0H
+         LA    R6,DSAPARM              parmdata address
+         L     R5,DSAPARML             parmdate length
+*
+ZPAR070  DS    0H
+         CLC   =CL5',DIS=',0(R6)       ID?
+         BNE   ZPAR080                 no
+         OI    DSAFLG1,DSA@SUNA        yes
+         ZTRCE PAR=D,LINKAGE=BRANCH    trace
+         B     ZPAR090
+*
+ZPAR080  DS    0H
+         CLC   =CL5',SVC=',0(R6)       ID?
+         BE    ZPAR090                 yes
+         LA    R6,1(,R6)               walk thru parmdata
+         BCT   R5,ZPAR070              loop
+         MVC   DSARC,=AL4(RC8)         error
+         ZWTO  MID=ZRMS89E,V1=ZPARSVC
+         B     ZPARXIT                 exit
+*
+ZPAR090  DS    0H
+         LA    R4,5(,R6)               copy list address
+         MVC   ZPARSVC,1(R6)           copy ID
+         LR    R2,R5                   copy length
+         LA    R3,1(,R6)               copy address+1
+*
+ZPAR100  DS    0H
+         CLC   =CL5',DIS=',0(R3)       duplicate ID?
+         BE    ZPAR110                 yes
+         CLC   =CL5',SVC=',0(R3)       duplicate ID?
+         BE    ZPAR110                 yes
+         LA    R3,1(,R3)               walk thru parmdata
+         BCT   R2,ZPAR100              loop
+         ZTRCE PAR=E,LINKAGE=BRANCH    trace
+         B     ZPAR120
+*
+ZPAR110  DS    0H
+         MVC   DSARC,=AL4(RC8)         error
+         ZWTO  MID=ZRMS88E,V1=ZPARSVC
+         B     ZPARXIT                 exit
+*
+ZPAR120  DS    0H
+         CLI   0(R6),BLANK             end of list?
+         BE    ZPAR130                 yes
+         CLC   =CL4',SP=',0(R6)        end of list?
+         BE    ZPAR130                 yes
+         CLC   =CL5',RPT=',0(R6)       end of list?
+         BE    ZPAR130                 yes
+         CLC   =CL5',RUN=',0(R6)       end of list?
+         BE    ZPAR130                 yes
+         CLC   =CL5',SMF=',0(R6)       end of list?
+         BE    ZPAR130                 yes
+         LA    R6,1(,R6)               walk thru parmdata
+         BCT   R5,ZPAR120              loop
+         ZTRCE PAR=F,LINKAGE=BRANCH    trace
+*
+ZPAR130  DS    0H
+         SR    R6,R4                   compute list length
+         LA    R3,ZPARSVC1             list address
+         ST    R3,ZPARVNXT             init list next address
+         AR    R3,R6                   list end address
+         ST    R3,ZPARVEND             save it
+         BCTR  R6,0
+         EX    R6,ZCOPYSVC             copy SVC list
+         LA    R6,2(,R6)               length +1
+         ST    R6,ZPARSVCL             save list length
+         OI    ZPARFLG1,ZPAR@SVC       set indicator
+         ZWTO  MID=ZRMS91I,V1=ZPARSVC  show SVC list
+*
+**       Parse SP= parmdata
+*
+         LA    R6,DSAPARM              parmdata address
+         L     R5,DSAPARML             parmdate length
+*
+ZPAR140  DS    0H
+         CLC   =CL4',SP=',0(R6)        ID?
+         BE    ZPAR150                 yes
+         LA    R6,1(,R6)               walk thru parmdata
+         BCT   R5,ZPAR140              loop
+         OI    ZPARFLG1,ZPAR@INI       initialization complete
+         XC    DSARC,DSARC             RC
+         B     ZPARXIT                 exit
+*
+ZPAR150  DS    0H
+         LA    R4,4(,R6)               copy list address
+         MVC   ZPARSP,1(R6)            copy ID
+         LR    R2,R5                   copy length
+         LA    R3,1(,R6)               copy address+1
+*
+ZPAR160  DS    0H
+         CLC   =CL4',SP=',0(R3)        duplicate ID?
+         BE    ZPAR170                 yes
+         LA    R3,1(,R3)               walk thru parmdata
+         BCT   R2,ZPAR160              loop
+         ZTRCE PAR=G,LINKAGE=BRANCH    trace
+         B     ZPAR180
+*
+ZPAR170  DS    0H
+         MVC   DSARC,=AL4(RC8)         error
+         ZWTO  MID=ZRMS81E,                                            +
+               V1==CL46'DUPLICATE SP= KEYWORD SPECIFIED'
+         B     ZPARXIT                 exit
+*
+ZPAR180  DS    0H
+         CLI   0(R6),BLANK             end of list?
+         BE    ZPAR190                 yes
+         CLC   =CL5',SVC=',0(R6)       end of list?
+         BE    ZPAR190                 yes
+         CLC   =CL5',RPT=',0(R6)       end of list?
+         BE    ZPAR190                 yes
+         CLC   =CL5',RUN=',0(R6)       end of list?
+         BE    ZPAR190                 yes
+         CLC   =CL5',SMF=',0(R6)       end of list?
+         BE    ZPAR190                 yes
+         LA    R6,1(,R6)               walk thru parmdata
+         BCT   R5,ZPAR180              loop
+         ZTRCE PAR=H,LINKAGE=BRANCH    trace
+*
+ZPAR190  DS    0H
+         SR    R6,R4                   compute list length
+         LA    R3,ZPARSPN1             list address
+         ST    R3,ZPARSNXT             init next list address
+         AR    R3,R6                   list end address
+         ST    R3,ZPARSEND             save it
+         BCTR  R6,0
+         EX    R6,ZCOPYSPN             copy SP list
+         LA    R6,2(,R6)               length +1
+         ST    R6,ZPARSPNL             save list length
+         OI    DSAFLG1,DSA@SPNM        set SP indicator
+         OI    ZPARFLG1,ZPAR@SPN       set SP indicator
+         OI    ZPARFLG1,ZPAR@INI       initialization complete
+         ZWTO  MID=ZRMS91I,V1=ZPARSP   show SP list
+         XC    DSARC,DSARC             RC
+         B     ZPARXIT
+*
+**       Process SVC list parmdata request
+*
+ZPAR200  DS    0H
+         CLC   =CL4'&PARSVC',0(R4)     SVC parse request?
+         BNE   ZPAR400                 no
+         XC    ZPARWORK,ZPARWORK       clear work flags
+         OI    ZPARFLG1,ZPAR@SVR       SVC parse request
+         ICM   R8,15,DSAZPARA          ZPAR init?
+         BNZ   ZPAR210                 yes
+         MVC   DSARC,=AL4(RC8)         error
+         ZWTO  MID=ZRMS81E,                                            +
+               V1==CL46'SVC= PARSE WRKAREA FAILED VALIDITY CHECK'
+         B     ZPARXIT                 exit
+*
+ZPAR210  DS    0H
+         TM    ZPARFLG1,ZPAR@INI       ZPAR init?
+         BNZ   ZPAR220                 yes
+         MVC   DSARC,=AL4(RC8)         error
+         ZWTO  MID=ZRMS81E,                                            +
+               V1==CL46'SVC= PARSE WRKAREA FAILED INITIALIZATION CHECK'
+         B     ZPARXIT                 exit
+*
+ZPAR220  DS    0H
+         L     R5,ZPARSVCL             SVC list length
+         L     R6,ZPARVNXT             SVC list next address
+         CLI   ZPARSEPV,BLANK          processing complete?
+         BNE   ZPAR230                 no
+         OI    ZPARFLG1,ZPAR@SVP       yes
+         XC    DSARC,DSARC             RC
+         ZTRCE PAR=I,LINKAGE=BRANCH    trace
+         B     ZPARXIT                 exit
+*
+ZPAR230  DS    0H
+         CLI   0(R6),COMMA             separator?
+         BE    ZPAR250                 yes
+         CLI   0(R6),BLANK             separator?
+         BE    ZPAR240                 yes
+         LA    R6,1(,R6)               walk thru SVC list
+         BCT   R5,ZPAR230              lop
+         MVC   DSARC,=AL4(RC8)         error
+         ZWTO  MID=ZRMS81E,                                            +
+               V1==CL46'SVC= PARMDATA PARSING ERROR DETECTED'
+         B     ZPARXIT                 exit
+*
+ZPAR240  DS    0H
+         MVC   ZPARSEPV,0(R6)          copy separator
+         OI    ZPARFLG1,ZPAR@SVP       processing complete
+         ZTRCE PAR=J,LINKAGE=BRANCH    trace
+*
+ZPAR250  DS    0H
+         L     R3,ZPARVNXT             SVC list next address
+         LR    R4,R6
+         SR    R6,R3                   compute SVC length
+         ST    R3,ZPARMACA             save SVC analog address
+         ST    R6,ZPARMACL             save SVC analog length
+         LA    R4,1(,R4)               skip separator
+         ST    R4,ZPARVNXT             SVC list next address
+         ZTRCE PAR=K,LINKAGE=BRANCH    trace
+*
+**       Validity check SVC number
+*
+         MVC   DSASVC,ZSVTZONE         move zones
+         CH    R6,=H'1'                SVC=n?
+         BNE   ZPAR260                 no
+         MVC   DSASVC1,0(R3)           copy SVC number
+         B     ZPAR280
+*
+ZPAR260  DS    0H
+         CH    R6,=H'2'                SVC=nn?
+         BNE   ZPAR270                 no
+         MVC   DSASVC2(2),0(R3)        copy SVC number
+         B     ZPAR280
+*
+ZPAR270  DS    0H
+         CH    R6,=H'3'                SVC=nnn?
+         BNE   ZPAR300                 no, check macro analog
+         MVC   DSASVC3(3),0(R3)        copy SVC number
+         ZTRCE PAR=L,LINKAGE=BRANCH    trace
+*
+ZPAR280  DS    0H
+         MVC   DSADWRD,ZSVTZONE        move zones
+         MVN   DSADWRD(3),DSASVC       move zones
+         CLC   DSADWRD(3),DSASVC       valid SVC?
+         BNE   ZPAR300                 no, check analog
+         MVC   ZPARSNUM,DSASVC         decimal SVC number
+         PACK  DSADWRD,DSASVC          pack SVC number
+         CVB   R2,DSADWRD              convert SVC to binary
+         STC   R2,ZPARNSVC             binary SVC number
+         CH    R2,=H'255'              valid SVC number?
+         BNH   ZPAR290                 yes
+         MVC   DSARC,=AL4(RC8)         error
+         ZWTO  MID=ZRMS90E,V1=DSASVC
+         B     ZPARXIT                 exit
+*
+ZPAR290  DS    0H
+         OI    ZPARWORK,ZPAR@WSV       SVC number indicator
+         SLL   R2,5                    multiply SVC by 32
+         L     R6,=V(SVCNTAB)          SVCNTAB table
+         LA    R6,0(R2,R6)             macro analog entry
+         USING SVNX,R6
+         ST    R6,ZPARSVNX             current SVNX entry
+         MVC   ZPARMACR,GETSTOR
+         TM    SVNXATTR,SVNX@SGM       getmain?
+         BNZ   ZPAR295                 yes
+         MVC   ZPARMACR,FREESTOR
+         TM    SVNXATTR,SVNX@SFM       freemain?
+         BNZ   ZPAR295                 yes
+         MVC   ZPARMACR,SVNXNAME       no
+         ZTRCE PAR=M,LINKAGE=BRANCH    trace
+         B     ZPAR299
+*
+ZPAR295  DS    0H
+         OI    DSAFLG2,DSA@STOR        set indicator
+         OI    ZPARWORK,ZPAR@WGM       set indicator
+         ZTRCE PAR=N,LINKAGE=BRANCH    trace
+*
+ZPAR299  DS    0H
+         XC    DSARC,DSARC             RC
+         ZTRCE PAR=O,LINKAGE=BRANCH    trace
+         B     ZPARXIT                 exit
+         DROP  R6
+*
+**       Validity check SVC analog
+*
+ZPAR300  DS    0H
+         MVC   ZPARMACR,ZSVTBLKS
+         L     R4,ZPARMACA             SVC name address
+         L     R3,ZPARMACL             SVC name length
+         BCTR  R3,0                    subtract one
+         EX    R3,ZCPYSVCM             copy macro analog
+         L     R6,=V(SVCNTAB)          SVCNTAB table
+         USING SVNX,R6                 SVNX table entry
+         LA    R5,SVCN@TBE             SVCNTAB entries
+         ZTRCE PAR=P,LINKAGE=BRANCH    trace
+*
+ZPAR310  DS    0H
+         LA    R4,ZPARDATA             workarea address
+         LA    R3,ZPAR@DTL             workarea length
+         MVC   ZPARDATA,ZSVTBLKS       scrub workarea
+         MVC   ZPARDATA(SVNX@NAM),SVNXNAME
+         L     R2,ZPARMACL             SVC analog length
+         BCTR  R2,0                    subtract one
+*
+ZPAR320  DS    0H
+         EX    R2,ZCMPSVCM             macro analog match?
+         BE    ZPAR330                 yes
+         LA    R4,1(,R4)               walk
+         BCT   R3,ZPAR320              loop
+         LA    R6,SVNX@SZE(,R6)        next SVNX entry
+         BCT   R5,ZPAR310              loop
+         MVC   DSARC,=AL4(RC8)         RC
+         ZWTO  MID=ZRMS94E,V1=ZPARMACR
+         B     ZPARXIT
+*
+ZPAR330  DS    0H
+         XR    R2,R2
+         IC    R2,SVNXSVCN             SVC number
+         ST    R6,ZPARSVNX             current SVNX entry
+         MVC   ZPARNSVC,SVNXSVCN       copy SVC number
+         OI    ZPARWORK,ZPAR@WSN       set indicator
+         CLC   GETSTOR,ZPARMACR        getmain SVC?
+         BE    ZPAR340                 yes
+         CLC   FREESTOR,ZPARMACR       freemain SVC?
+         BNE   ZPAR399                 no
+*
+ZPAR340  DS    0H
+         OI    DSAFLG2,DSA@STOR        yes
+         OI    ZPARWORK,ZPAR@WGM       set indicator
+         ZTRCE PAR=R,LINKAGE=BRANCH    trace
+*
+ZPAR399  DS    0H
+         XC    DSARC,DSARC             RC
+         ZTRCE PAR=S,LINKAGE=BRANCH    trace
+         B     ZPARXIT                 exit
+         DROP  R6
+*
+**       Process SP list parmdata request
+*
+ZPAR400  DS    0H
+         CLC   =CL4'&PARSPN',0(R4)     SP parse request?
+         BNE   ZPAR900                 no
+         XC    ZPARWORK,ZPARWORK       clear work flags
+         OI    ZPARFLG1,ZPAR@SPR       SP parse request
+         ICM   R8,15,DSAZPARA          ZPAR init?
+         BNZ   ZPAR410                 yes
+         MVC   DSARC,=AL4(RC8)         error
+         ZWTO  MID=ZRMS81E,                                            +
+               V1==CL46'SP= PARSE WRKAREA FAILED VALIDITY CHECK'
+         B     ZPARXIT                 exit
+*
+ZPAR410  DS    0H
+         TM    ZPARFLG1,ZPAR@INI       ZPAR init?
+         BNZ   ZPAR420                 yes
+         MVC   DSARC,=AL4(RC8)         error
+         ZWTO  MID=ZRMS81E,                                            +
+               V1==CL46'SP= PARSE WRKAREA FAILED INITIALIZATION CHECK'
+         B     ZPARXIT                 exit
+*
+ZPAR420  DS    0H
+         L     R5,ZPARSPNL             SP list length
+         L     R6,ZPARSNXT             SP next list address
+         CLI   ZPARSEPS,BLANK          processing complete?
+         BNE   ZPAR430                 no
+         OI    ZPARFLG1,ZPAR@SPP       yes
+         XC    DSARC,DSARC             RC
+         ZTRCE SPN=A,LINKAGE=BRANCH    trace
+         B     ZPARXIT
+*
+ZPAR430  DS    0H
+         CLI   0(R6),COMMA             separator?
+         BE    ZPAR450                 yes
+         CLI   0(R6),BLANK             separator?
+         BE    ZPAR440                 yes
+         LA    R6,1(,R6)               walk thru SP list
+         BCT   R5,ZPAR430              loop
+         MVC   DSARC,=AL4(RC8)         error
+         ZWTO  MID=ZRMS81E,                                            +
+               V1==CL46'SP= PARMDATA PARSING ERROR DETECTED'
+         B     ZPARXIT                 exit
+*
+ZPAR440  DS    0H
+         MVC   ZPARSEPS,0(R6)          copy separator
+         OI    ZPARFLG1,ZPAR@SPP       processing complete
+         ZTRCE SPN=B,LINKAGE=BRANCH    trace
+*
+ZPAR450  DS    0H
+         L     R3,ZPARSNXT             SP next list address
+         LR    R4,R6
+         SR    R6,R3                   compute SP length
+         ST    R3,ZPARANLA             save SP analog address
+         ST    R6,ZPARANLL             save SP analog length
+         LA    R4,1(,R4)               skip separator
+         ST    R4,ZPARSNXT             SP next list address
+         ZTRCE SPN=C,LINKAGE=BRANCH    trace
+*
+**       Validity check SP number
+*
+         MVC   DSASPN,ZSVTZONE         move zones
+         CH    R6,=H'1'                SP=n?
+         BNE   ZPAR460                 no
+         MVC   DSASPN1,0(R3)           copy SP number
+         ZTRCE SPN=D,LINKAGE=BRANCH    trace
+         B     ZPAR480
+*
+ZPAR460  DS    0H
+         CH    R6,=H'2'                SP=nn?
+         BNE   ZPAR470                 no
+         MVC   DSASPN2(2),0(R3)        copy SP number
+         ZTRCE SPN=E,LINKAGE=BRANCH    trace
+         B     ZPAR480
+*
+ZPAR470  DS    0H
+         CH    R6,=H'3'                SP=nnn?
+         BNE   ZPAR600                 no, check SP name
+         MVC   DSASPN3(3),0(R3)        copy SP number
+         ZTRCE SPN=F,LINKAGE=BRANCH    trace
+*
+ZPAR480  DS    0H
+         MVC   DSADWRD,ZSVTZONE        move zones
+         MVN   DSADWRD(3),DSASPN       move zones
+         CLC   DSADWRD(3),DSASPN       valid SP?
+         BNE   ZPAR600                 no, check SP name
+         MVC   ZPARSNUM,DSASPN         decimal SP number
+         PACK  DSADWRD,DSASPN          pack SP number
+         CVB   R2,DSADWRD              convert SP to binary
+         STC   R2,ZPARNSPN             binary SP number
+         CH    R2,=H'255'              valid SP number?
+         BNH   ZPAR499                 yes
+         MVC   DSARC,=AL4(RC8)         error
+         ZWTO  MID=ZRMS82E,V1=DSASPN
+         ZTRCE SPN=G,LINKAGE=BRANCH    trace
+         B     ZPARXIT                 exit
+*
+ZPAR499  DS    0H
+         OI    ZPARWORK,ZPAR@WSP       SP number indicator
+         XC    DSARC,DSARC             RC
+         ZTRCE SPN=H,LINKAGE=BRANCH    trace
+         B     ZPARXIT                 exit
+*
+**       Validity check SP analog
+*
+ZPAR600  DS    0H
+         MVC   ZPARSPNM,ZSVTBLKS
+         L     R4,ZPARANLA             SP name address
+         L     R3,ZPARANLL             SP name length
+         BCTR  R3,0                    subtract one
+         EX    R3,ZCPYSPNM             copy SP name
+         OI    ZPARWORK,ZPAR@WNM       set indicator
+         XC    DSARC,DSARC             RC
+         ZTRCE SPN=I,LINKAGE=BRANCH    trace
+         B     ZPARXIT                 exit
+*
+**       Release parser workarea
+*
+ZPAR900  DS    0H
+         CLC   =CL4'&PARTRM',0(R4)
+         BE    ZPAR910                 yes
+         ZWTO  MID=ZRMS81E,                                            +
+               V1==CL46'INVALID PARSE SERVICE REQUEST'
+         MVC   DSARC,=AL4(RC8)         RC
+         B     ZPARXIT                 error
+*
+ZPAR910  DS    0H
+         ICM   R8,15,DSAZPARA          ZPAR init?
+         BNZ   ZPAR920                 yes
+         XC    DSARC,DSARC             RC
+         B     ZPARXIT                 exit
+*
+ZPAR920  DS    0H
+         XC    DSAZPARA,DSAZPARA
+         L     R2,DSAEKEY              caller protect key
+         STORAGE RELEASE,COND=YES,SP=230,KEY=(2),                      +
+               ADDR=(8),LENGTH=ZPAR@SZE,LINKAGE=SYSTEM
+         ST    R15,DSARC
+         LTR   R15,R15
+         BZ    ZPARXIT
+         ZWTO  MID=ZRMS84E,                                            +
+               V1==CL8'ZPARSER',V2==CL7'RELEASE',V3=DSARC
+*
+ZPARXIT  DS    0H
+         L     R15,DSARC               RC
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R0,R12,GPR@R0(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        EXecuted Instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+ZCOPYSPN MVC   ZPARSPN1(*-*),0(R4)     copy SP parmdata
+ZCOPYSVC MVC   ZPARSVC1(*-*),0(R4)     copy SVC parmdata
+ZCPYSVCM MVC   ZPARMACR(*-*),0(R4)     copy macro analog
+ZCMPSVCM CLC   ZPARMACR(*-*),0(R4)     compare macro analog
+ZCPYSPNM MVC   ZPARSPNM(*-*),0(R4)     copy subpool name
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0C
+GETSTOR  DC    CL8'GETMAIN'            storage obtain
+FREESTOR DC    CL8'FREEMAIN'           storage release
+         DS    0C
+CHARTAB  DC    C'@#$%*+-?:;<>/|\(")'   invalid characters
+CHARTABN EQU   *-CHARTAB               number of characters
+         LTORG ,
+         DROP  ,
+*---------------------------------------------------------------------*
+*        Dynamic Storage Area                                         *
+*--------+---------+---------+---------+---------+---------+---------+*
+DSA      DSECT ,
+DSASAVE  DS    18F                     mainline savearea
+DSARSSA  DS    18F                     routine savearea
+DSASSSA  DS    18F                     subroutine savearea
+DSANSSA  DS    18F                     nested subroutine saveara
+         DS    0X
+DSAFLG1  DS    XL1                     flags
+DSA@STAE EQU   X'80'                   recovery indicator
+DSA@LRPT EQU   X'40'                   RPT={D|S} option indicator
+DSA@LRUN EQU   X'20'                   RUN={S|J} option indicator
+DSA@LSMF EQU   X'10'                   SMF=(Y|N} option indicator
+DSA@SUNA EQU   X'08'                   DIS= keyword found indicator
+DSA@SPNM EQU   X'04'                   SP= specified indicator
+DSA@1RV6 EQU   X'02'                   -available
+DSA@1RV7 EQU   X'01'                   -available
+         DS    0X
+DSAFLG2  DS    XL1                     flags
+DSA@STOR EQU   X'80'                   getmain/freemain indicator
+DSA@WSSI EQU   X'40'                   WTOSSI caller indicator
+DSA@SVCE EQU   X'20'                   SVCE valid indicator
+DSA@CSTO EQU   X'10'                   STOK token created indicator
+DSA@RSTO EQU   X'08'                   STOK token retrieved indicator
+DSA@2RV5 EQU   X'04'                   -available
+DSA@2RV6 EQU   X'02'                   -available
+DSA@2RV7 EQU   X'01'                   -available
+         DS    0F
+DSARC    DS    F                       RC
+DSAXRC   DS    F                       RC savearea
+DSARSN   DS    F                       R0
+DSARACF  DS    F                       UACC attribute
+DSAEKEY  DS    F                       entry protect key
+DSACKEY  DS    F                       caller protect key
+DSATOKN  DS    F                       ESTAE token
+DSASSCT  DS    F                       SSCT address
+DSASSOB  DS    F                       SSOB address
+DSALOGA  DS    F                       ATCLOG EPA ptr
+DSAFCID  DS    F                       display function ID
+DSAWORD  DS    F                       workarea
+DSAZPARA DS    F                       ZPAR workarea address
+DSAPARML DS    F                       parmdata length
+         DS    0F
+DSASTABA DS    F                       current STAB address
+DSASTABZ DS    F                       STAB table size
+DSALGXEA DS    F                       LGXE entry address
+DSALGXEZ DS    F                       LGXE entry size
+         DS    0D
+DSADWRD  DS    D                       conversion work area
+         DS    0C
+DSAOPRPT DS    CL1                     RPT= option value
+DSAOPRUN DS    CL1                     RUN= option value
+DSAOPSMF DS    CL1                     SMF= option value
+DSAASTYP DS    CL3                     address space type
+DSAVARDA DS    CL8                     workarea
+DSAASNAM DS    CL8                     ASname
+DSAGJBNM DS    CL8                     JOBname
+DSAAGDDN DS    CL8                     SSAGDDNM DDname
+DSADDNAM DS    CL8                     MONLOG DDname
+DSADDBAD DS    CL8                     bad DDname field
+         DS    0C
+DSASVC   DS    0CL3
+DSASVC3  DS    CL1                     SVC=nnn
+DSASVC2  DS    CL1                     SVC=nn
+DSASVC1  DS    CL1                     SVC=n
+DSASVC0  DS    CL1                     -reserved
+DSASVCZ  EQU   *-DSASVC                keep it together
+         DS    0C
+DSASPN   DS    0CL3
+DSASPN3  DS    CL1                     SP=nnn
+DSASPN2  DS    CL1                     SP=nn
+DSASPN1  DS    CL1                     SP=n
+DSASPN0  DS    CL1                     -reserved
+DSASPNZ  EQU   *-DSASPN                keep it together
+         DS    0C
+DSAVAR   DS    CL8                     variable data
+DSAVARX  DS    CL1                     slack byte
+DSA@VARZ EQU   *-DSAVAR                keep it together
+         DS    0D
+DSAWTOBF DS    CL120                   WQETXT text
+DSA@WTOZ EQU   *-DSAWTOBF              WQETXT length
+         DS    0D
+DSASVCET DS    CL(SVCE@TBZ)            local SVCETAB table
+         DS    0D
+DSASPNTB DS    CL(SPN@TABL)            local SPNTAB table
+         DS    0D
+DSASTOKT DS    CL(STOK@SZE)            STOK Name/Token pair
+         DS    0D
+DSAENTBF DS    0CL255                  SAF profile data
+DSAENTBL DS    AL2                     -buffer length
+DSAENTEL DS    AL2                     -profile length
+DSAENTTY DS    CL251                   -profile name
+DSA@ENTL EQU   *-DSAENTTY              -profile name length
+DSA@ENTZ EQU   *-DSAENTBF              profile buffer lenght
+         DS    0C
+DSACLASS DS    0CL9                    CLASS field
+DSACZSZE DS    AL1                     -size
+DSACZRMS DS    CL8                     -name
+DSA@CLSZ EQU   *-DSACLASS              CLASS field size
+         DS    0D
+DSAXWORK DS    0CL512                  SAF workarea
+DSAPARM  DS    0CL512                  SUBSYS DD workarea
+DSADATA1 DS    CL256                   -parmdata
+DSADATA2 DS    CL256                   -parmdata
+DSAXWRKL EQU   *-DSAXWORK              keep it togeter
+         DS    0D
+DSAPLST  DS    XL256                   parmlist
+DSA@PLSZ EQU   *-DSAPLST               keep it together
+         DS    0D
+DSAZRWA  DS    CL(ZRWA@SZE)            ZRWA recovery workarea
+         DS    0D
+DSA@SIZE EQU   *-DSA                   size of DSA
+*---------------------------------------------------------------------*
+*        ZPAR Parser workarea                                         *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZPAR     DSECT ,
+ZPARID   DS    CL4'ZPAR'               ID
+ZPARFLG1 DS    XL1                     flags
+ZPAR@INI EQU   X'80'                   initialization complete
+ZPAR@SVC EQU   X'40'                   SVC parmdata specified
+ZPAR@SVP EQU   X'20'                   SVC list processing complete
+ZPAR@SPN EQU   X'10'                   SP parmdata specified
+ZPAR@SPP EQU   X'08'                   SP list processing complete
+ZPAR@SVR EQU   X'04'                   SVC parse request
+ZPAR@SPR EQU   X'02'                   SP parse request
+ZPAR@1V7 EQU   X'01'                   -available
+         DS    0X
+ZPARWORK DS    XL1                     work flags
+ZPAR@WSV EQU   X'80'                   SVC number indicator
+ZPAR@WSN EQU   X'40'                   SVC name indicator
+ZPAR@WSP EQU   X'20'                   SP number indicator
+ZPAR@WNM EQU   X'10'                   SP name indicator
+ZPAR@WGM EQU   X'08'                   getmain/freemain indicator
+ZPAR@2V5 EQU   X'04'                   -available
+ZPAR@2V6 EQU   X'02'                   -available
+ZPAR@2V7 EQU   X'01'                   -available
+         DS    0X
+ZPARNSPN DS    XL1                     Binary SP number
+ZPARNSVC DS    XL1                     Binary SVC number
+         DS    0F
+ZPARSVCL DS    F                       SVC list length
+ZPARVEND DS    F                       SVC list end address
+ZPARVNXT DS    F                       SVC list next address
+ZPARVCNT DS    F                       SVC list count
+ZPARSVNX DS    F                       current SVNX address
+         DS    0F
+ZPARSPNL DS    F                       SP list length
+ZPARSEND DS    F                       SP list end address
+ZPARSNXT DS    F                       SP list next address
+ZPARSCNT DS    F                       SP list count
+ZPARSPNX DS    F                       current SPNX address
+         DS    0F
+ZPARMACA DS    F                       SVC analog address
+ZPARMACL DS    F                       SVC analog length
+ZPARANLA DS    F                       SP analog address
+ZPARANLL DS    F                       SP analog length
+         DS    0D
+ZPARSVCI DS    CL1                     screen indicator
+ZPARSEPV DS    CL1                     SVC separator
+ZPARSEPS DS    CL1                     SP separator
+ZPARSEPE DS    CL1                     separator value
+ZPARSNUM DS    CL3                     SVC number
+ZPARSPNM DS    CL4                     subpool name
+ZPARMACR DS    CL8                     SVC macro analog
+ZPARCRV3 DS    CL8                     -available
+ZPARCRV4 DS    CL8                     -available
+         DS    0D
+ZPARPID  DS    CL5'PARM='              ID
+ZPARPAR1 DS    CL256                   input parmdata
+ZPARPAR2 DS    CL256                   input parmdata
+         DS    0D
+ZPARSVC  DS    CL4'SVC='               ID
+ZPARSVC1 DS    CL256                   -SVC data
+ZPARSVC2 DS    CL256                   -SVC data
+ZPAR@SVZ EQU   *-ZPARSVC               length
+         DS    0D
+ZPARSP   DS    CL3'SP='                ID
+ZPARSPN1 DS    CL256                   -subpool data
+ZPARSPN2 DS    CL256                   -subpool data
+ZPAR@SPZ EQU   *-ZPARSP                length
+         DS    0D
+ZPARWK   DS    CL5'WORK='              ID
+ZPARDATA DS    CL80                    general workarea
+ZPAR@DTL EQU   *-ZPARDATA              workarea length
+         DS    0D
+ZPAR@SZE EQU   *-ZPAR                  length
+*
+**       ZSPN subpool analog map
+*
+ZSPN     DSECT ,
+ZSPNTYPE DS    AL1                     subpool type
+ZSPNSUBP DS    CL4                     subpool name
+ZSPN@SZE EQU   *-ZSPN                  size
+
+*---------------------------------------------------------------------*
+*        Server Data Areas                                            *
+*--------+---------+---------+---------+---------+---------+---------+*
+         PRINT GEN
+         ZSVT  ,
+         ZRWA  ,
+         ZGEQU ,
+         ZTABS GEN=SVMACRO
+         ZTABS GEN=SST,DSECT=YES
+         ZTABS GEN=SVCTBLE,DSECT=YES
+         ZTABS GEN=SVNTBLE,DSECT=YES
+         ZTABS GEN=SPNTBLE,DSECT=YES
+         ZMACS GEN=TOKEN,DSECT=YES
+         ZMACS GEN=MID,ID=XID,DSECT=YES
+*---------------------------------------------------------------------*
+*        System data areas                                            *
+*--------+---------+---------+---------+---------+---------+---------+*
+         PRINT GEN
+         IHAPSA ,
+         IHAASCB ,
+         IHAASXB ,
+         IHAASSB ,
+         IKJTCB DSECT=YES
+         IHASTCB ,
+         IKJRB DSECT=YES,LIST=YES
+         IHACDE ,
+         CVT   DSECT=YES
+         IEFJESCT ,
+         IEFJSCVT ,
+         IEFJSSIB ,
+         IEFJSSOB (AL,DA,CI,AG,ET,WT),CONTIG=NO
+         IEFSSARB ,
+         IEFJSSWA ,
+         IHAWQE ,
+         ICHSAFP ,
+         IHASVC ,
+         IEANTASM ,
+JFCB     DSECT ,
+         IEFJFCBN LIST=YES
+         DCBD  DSORG=PS,DEVD=DA
+         END

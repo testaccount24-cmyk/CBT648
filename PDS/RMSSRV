@@ -1,0 +1,49 @@
+RMSSRV   CSECT
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        RMSSRV                                              */
+*/*                                                                  */
+*/* Function:    ZRMS subsystem control tables                       */
+*/*                                                                  */
+*/* Description: A collection of address vectors, constants,         */
+*/*              queue anchors and counters common to all ZRMS       */
+*/*              subsystem service routines.                         */
+*/*                                                                  */
+*/* Attributes:  Non-exacutable, LPA-resident                        */
+*/*                                                                  */
+*/* Copyright:   Ben Marino. 2021 - 2023 (unpublished)               */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @01 | V1R1 | 09242022 | Ben Marino  | Initial version               *
+*     |      |          |             |                               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+         COPY  ZGBLS
+RMSSRV   AMODE 31
+RMSSRV   RMODE ANY
+*
+**       Generate ZSVT vector table
+*
+         ENTRY RMSSRV
+         ZSVT  DSECT=NO
+*
+**       Generate SVCE control table
+*
+         ENTRY SVCETAB
+         ZTABS GEN=SVCTBLE,DSECT=NO
+*
+**       Generate SVCN macro name table
+*
+         ENTRY SVCNTAB
+         ZTABS GEN=SVNTBLE,DSECT=NO
+*
+**       Generate SPN subpool attributes table
+*
+         ENTRY SPNTAB
+         ZTABS GEN=SPNTBLE,DSECT=NO
+         END   ,

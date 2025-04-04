@@ -1,0 +1,101 @@
+         MACRO
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name:        ZCALL                                              */
+.*/*                                                                 */
+.*/* Description: ZRMS subsystem service call macro                  */
+.*/*                                                                 */
+.*/* Copyright:   Ben Marino. 2021 - 2023 (unpublished)              */
+.*/*                                                                 */
+.*/*******************************************************************/
+.*---------------------------CHANGE LOG-------------------------------*
+.*                                                                    *
+.* ID    Rel    Date       Author        Comments                     *
+.*--------------------------------------------------------------------*
+.* @01 | V1R1 | 09242022 | Ben Marino  | Initial version              *
+.*     |      |          |             |                              *
+.*     |      |          |             |                              *
+.**********************************************************************
+.*-------+---------+---------+---------+---------+---------+---------+*
+&ZCALL   ZCALL &P1,&P2,&RC=,&RSN=,&SR=,&EP=,&VR=,&RETURN=YES
+.*
+         AIF   ('&P1' EQ '').CALL10
+         AIF   ('&P1'(1,1) EQ '(').CALL00
+         LA    1,&P1                  .parameter
+         AGO   .CALL10
+.*
+.CALL00  ANOP  ,
+         LR    1,&P1                  .parameter
+.*
+.CALL10  ANOP  ,
+         AIF   ('&P2' EQ '').CALL30
+         AIF   ('&P2'(1,1) EQ '(').CALL20
+         L     0,&P2                  .parameter
+         AGO   .CALL30
+.*
+.CALL20  ANOP  ,
+         LR    0,&P2                  .parameter
+.*
+.CALL30  ANOP  ,
+         AIF   ('&SR' EQ '').CALL40
+         AIF   ('&EP' NE '').ERR01
+         AIF   ('&VR' NE '').ERR01
+         L     15,=A(&SR)             .EPA
+         BSM   15,0                   .set AMODE
+         AIF   ('&RETURN' EQ 'YES').CALL35
+         AIF   ('&RETURN' NE 'NO').ERR03
+         BR    R15                    .call service routine
+         AGO   .CALL80
+.*
+.CALL35  ANOP  ,
+         BASR  14,15                  .call service routine
+         AGO   .CALL80
+.*
+.CALL40  ANOP  ,
+         AIF   ('&EP' EQ '').CALL50
+         AIF   ('&SR' NE '').ERR01
+         AIF   ('&VR' NE '').ERR01
+         L     15,=V(&EP)             .EPA
+         BSM   15,0                   .set AMODE
+         AIF   ('&RETURN' EQ 'YES').CALL45
+         AIF   ('&RETURN' NE 'NO').ERR03
+         BR    R15                    .call service routine
+         AGO   .CALL80
+.*
+.CALL45  ANOP  ,
+         BASR  14,15                  .call service routine
+         AGO   .CALL80
+.*
+.CALL50  ANOP  ,
+         AIF   ('&VR' EQ '').ERR02
+         AIF   ('&EP' NE '').ERR01
+         AIF   ('&SR' NE '').ERR01
+         L     15,&VR                 .EPA
+         BSM   15,0                   .set AMODE
+         AIF   ('&RETURN' EQ 'YES').CALL55
+         AIF   ('&RETURN' NE 'NO').ERR03
+         BR    R15                    .call service routine
+         AGO   .CALL80
+.*
+.CALL55  ANOP  ,
+         BASR  14,15                  .call service routine
+.*
+.CALL80  ANOP  ,
+         AIF   ('&RC' EQ '').CALL90
+         ST    R15,&RC                .save RC
+.*
+.CALL90  ANOP  ,
+         AIF   ('&RSN' EQ '').CALL99
+         ST    0,DSARSN               .save RSN
+.*
+.CALL99  ANOP  ,
+         MEXIT ,
+.*
+.**      Macro Notes
+.*
+.ERR01   MNOTE 8,'*** SR/EP/VR operands are mutually exclusive'
+         MEXIT ,
+.ERR02   MNOTE 8,'*** SR/EP/VR operand required not specified'
+         MEXIT ,
+.ERR03   MNOTE 8,'*** Invalid RETURN operand specified'
+         MEND  ,

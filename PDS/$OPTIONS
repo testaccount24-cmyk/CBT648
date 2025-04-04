@@ -1,0 +1,72 @@
+*/*********************************************************************
+*/*
+*/*
+*/*                          ZRMS
+*/*                RESOURCE MONITOR SUBSYSTEM
+*/*                         OPTIONS
+*/*
+*/* ZRMS SUBSYSTEM OPTIONS:
+*/*  The following options are specified on the SUBSYS keyword of
+*/*  PARMLIB member IEFSSNxx or by MVS command SETSSI to add the
+*/*  ZRMS resource monitor subsystem to MVS.
+*/*
+*/*  IEFSSNxx EXAMPLE:
+*/*   SUBSYS SUBNAME(ZRMS)
+*/*          INITRTN(ZRMSINI)
+*/*          INITPARM('SVC=nnn,SMF=nnn')
+*/*
+*/*  COMMAND EXAMPLE:
+*/*   SETSSI ADD,SUB=ZRMS,I=ZRMSINI,P='SVC=nnn,SMF=nnn'
+*/*
+*/*
+*/* OPTIONS:
+*/*  CMP={NO|YES} Specifies if WTO message text compression is active
+*/*               or inactive. CMP=NO does not compress the message
+*/*               text. CMP=YES removes message text duplicate blanks.
+*/*               If not specified the default is CMP=YES.
+*/*
+*/*  CON={NO|YES} Specifies if the SETCON MN,JOBNAMES=(ON,LOG)
+*/*               command should be internally issued to allow the
+*/*               ZRMS subsystem to listen for monitored messages.
+*/*               If not specified the default is CON=NO.
+*/*
+*/*  DMP={NO|YES} Specifies if SDUMPs should be taken when abnormal
+*/*               termination errors occur. If not specified, the
+*/*               default is DMP=NO.
+*/*
+*/*  SAF={class}  Specifies the security class that will be used
+*/*               to make authorization checks. If not specified
+*/*               extermal security is not invoked.
+*/*               Refer to SRCLIB($RACF) for security server
+*/*               implementation details.
+*/*
+*/*  SMF=nnn      Specifies a user-defined SMF record number in the
+*/*               range of 200 to 255. This parameter in conjuction
+*/*               with SMF=Y specified on the SUBSYS=ZRMS DD, allows
+*/*               ZRMS to record monitored data to SMF.
+*/*               If not specified, the default is NO.
+*/*               Refer to SRCLIB($AUDITS) for a description of the
+*/*               SMF=Y option.
+*/*
+*/*  SVC=nnn      Specifies the subsystem SVC number to install.
+*/*               You MUST specifiy an available SVC number in the
+*/*               range of 200 to 255. DONOT specify an SVC number
+*/*               that has been assigned to othor OEM products or
+*/*               applications. If SVC= is not specified, subsystem
+*/*               initialization fails.
+*/*
+*/*  TRC={ON|OFF} Specifies if internal code tracing is ON or OFF.
+*/*               If not specified, the default is TRC=OFF.
+*/*
+*/*
+*/* CONTACT ME:
+*/*  Feel free to contact me if you have questions.
+*/*
+*/*  Ben Marino
+*/*  Freelance zArchitect|zMentor|zInstructor
+*/*  719.271.1344
+*/*  b2marino@outlook.com
+*/*  linkedin.com/in/ben-marino-40887915
+*/*
+*/*
+*/*********************************************************************

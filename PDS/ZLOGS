@@ -1,0 +1,48 @@
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name: ZLOGS                                                     */
+.*/*                                                                 */
+.*/* Description: ZRMS subsystem PUT macro                           */
+.*/*                                                                 */
+.*/* Notes: None                                                     */
+.*/*                                                                 */
+.*/* © Copyright Ben Marino. 2021 - 2023 (unpublished)               */
+.*/*                                                                 */
+.*/*                                                                 */
+.*/*******************************************************************/
+.*---------------------------CHANGE LOG-------------------------------*
+.*                                                                    *
+.* ID    Rel    Date       Author        Comments                     *
+.*--------------------------------------------------------------------*
+.* @01 | V1R1 | 09242022 | Ben Marino  | Initial version              *
+.*     |      |          |             |                              *
+.*     |      |          |             |                              *
+.**********************************************************************
+.*-------+---------+---------+---------+---------+---------+---------+*
+         MACRO
+         ZLOGS &DCB,&RECORD,&WRKREG=R15
+.*
+         LCLC  &ZSV
+&ZSV     SETC  'ZPT'.'&SYSNDX'
+.*
+         AIF   ('&DCB'(1,1) EQ '(').PUT00
+         TM    48(&DCB),X'10'          .opened?
+         BZ    &ZSV.A                  .no
+         PUT   &DCB,&RECORD            .log record
+&ZSV.A   DS    0H
+         MEXIT ,
+.*
+.PUT00   ANOP  ,
+         AIF   ('&RECORD'(1,1) EQ '(').PUT10
+         TM    48(&DCB),X'10'          .opened?
+         BZ    &ZSV.B                  .no
+         PUT   (&DCB),&RECORD          .log record
+&ZSV.B   DS    0H
+         MEXIT ,
+.*
+.PUT10   ANOP  ,
+         TM    48(&DCB),X'10'          .opened?
+         BZ    &ZSV.C                  .no
+         PUT   (&DCB),(&RECORD)        .log record
+&ZSV.C   DS    0H
+         MEND

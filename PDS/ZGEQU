@@ -1,0 +1,218 @@
+         MACRO
+*/*******************************************************************/
+*/*                                                                 */
+*/* Name:        ZGEQU                                              */
+*/*                                                                 */
+*/* Description: ZRMS subsystem equates macro                       */
+*/*                                                                 */
+*/* Copyright:   Ben Marino. 2021 - 2023 (unpublished)              */
+*/*                                                                 */
+*/*******************************************************************/
+*---------------------------CHANGE LOG-------------------------------*
+*                                                                    *
+* ID    Rel    Date       Author        Comments                     *
+*--------------------------------------------------------------------*
+* @01 | V1R1 | 09242022 | Ben Marino  | Initial version              *
+*     |      |          |             |                              *
+*     |      |          |             |                              *
+**********************************************************************
+*--------+---------+---------+---------+---------+---------+--------+*
+         ZGEQU ,
+*
+**       Save Area Offsets
+*
+GPR@PLI  EQU   0            save area offset 0
+GPR@BWD  EQU   4            save area offset 4
+GPR@FWD  EQU   8            save area offset 8
+GPR@R14  EQU   12           save area offset 12
+GPR@R15  EQU   16           save area offset 16
+GPR@R0   EQU   20           save area offset 20
+GPR@R1   EQU   24           save area offset 24
+GPR@R2   EQU   28           save area offset 28
+*
+**       Register Equates
+*
+R0       EQU   0            general REG 0
+R1       EQU   1            general REG 1
+R2       EQU   2            general REG 2
+R3       EQU   3            general REG 3
+R4       EQU   4            general REG 4
+R5       EQU   5            general REG 5
+R6       EQU   6            general REG 6
+R7       EQU   7            general REG 7
+R8       EQU   8            general REG 8
+R9       EQU   9            general REG 9
+R10      EQU   10           general REG 10
+R11      EQU   11           general REG 11
+R12      EQU   12           general REG 12
+R13      EQU   13           general REG 13
+R14      EQU   14           general REG 14
+R15      EQU   15           general REG 15
+*
+AR0      EQU   0            access REG 0
+AR1      EQU   1            access REG 1
+AR2      EQU   2            access REG 2
+AR3      EQU   3            access REG 3
+AR4      EQU   4            access REG 4
+AR5      EQU   5            access REG 5
+AR6      EQU   6            access REG 6
+AR7      EQU   7            access REG 7
+AR8      EQU   8            access REG 8
+AR9      EQU   9            access REG 9
+AR10     EQU   10           access REG 10
+AR11     EQU   11           access REG 11
+AR12     EQU   12           access REG 12
+AR13     EQU   13           access REG 13
+AR14     EQU   14           access REG 14
+AR15     EQU   15           access REG 15
+*
+HR0      EQU   0            high REG 0
+HR1      EQU   1            high REG 1
+HR2      EQU   2            high REG 2
+HR3      EQU   3            high REG 3
+HR4      EQU   4            high REG 4
+HR5      EQU   5            high REG 5
+HR6      EQU   6            high REG 6
+HR7      EQU   7            high REG 7
+HR8      EQU   8            high REG 8
+HR9      EQU   9            high REG 9
+HR10     EQU   10           high REG 10
+HR11     EQU   11           high REG 11
+HR12     EQU   12           high REG 12
+HR13     EQU   13           high REG 13
+HR14     EQU   14           high REG 14
+HR15     EQU   15           high REG 15
+*
+**       General equates
+*
+XFF      EQU   X'FF'        foxes
+XZERO    EQU   X'00'        hex zero
+ENDVL    EQU   X'80'        end-of-list indicator
+AMODE31  EQU   X'80'        AMODE=31 indicator
+ATCHSVC  EQU   X'2A'        ATTACH/X indicator
+*
+BLANK    EQU   C' '         blank
+PUNTO    EQU   C'.'         period
+COMMA    EQU   C','         comma
+COLON    EQU   C':'         colon
+OPAREN   EQU   C'('         open paren
+CPAREN   EQU   C')'         close paren
+DASH     EQU   C'-'         dash
+SLASH    EQU   C'/'         slash
+COMMENT  EQU   C'*'         comment record
+GENERIC  EQU   C'*'         generic character
+DOLLAR   EQU   C'$'         dollar
+STAR     EQU   C'*'         *asterisk
+ASHTAG   EQU   C'#'         ashtag
+ATSIGN   EQU   C'@'         @sign
+ALPHA    EQU   C'A'         alpha
+ZEBRA    EQU   C'Z'         alpha
+ZERO     EQU   C'0'         decimal 0
+NINE     EQU   C'9'         decimal 9
+*
+**       Program Interrupt Codes
+*
+PIC4     EQU   X'04'        S0C4-4
+PIC10    EQU   X'10'        S0C4-10
+PIC11    EQU   X'11'        S0C4-11
+PIC5     EQU   X'05'        S0C5
+OVERRIDE EQU   X'80'        SVC screening override
+*
+**       SUBSYS=() error codea
+*
+SRC01    EQU   X'0001'      AUDIT= parameter not specified
+SRC02    EQU   X'0002'      Invalid AUDIT= parameter specified
+SRC03    EQU   X'0003'      error RC
+SRC04    EQU   X'0004'      Server error
+SRC05    EQU   X'0005'      Server error
+SRC06    EQU   X'0006'      Server error
+SRC07    EQU   X'0007'      Server error
+*
+**       Return Codes
+*
+RC0      EQU   X'00000000'  Successful RC
+RC4      EQU   X'00000004'  Warning RC
+RC8      EQU   X'00000008'  error RC
+RC12     EQU   X'00000012'  Server error
+RC16     EQU   X'00000016'  Server error
+RC256    EQU   X'00000256'  Server error
+*
+**       Reason Codes
+*
+RSN0     EQU   X'00000000'  Request successful
+RSN4     EQU   X'00000004'  -available
+RSN8     EQU   X'00000008'  -available
+RSN12    EQU   X'00000012'  -available
+RSN28    EQU   X'00000028'  SVCXIT - SVCE table failed validity check
+RSN32    EQU   X'00000032'  SVCXIT - ZSVT table failed validity check
+RSN36    EQU   X'00000036'  RMSSSI - SVCE table failed validity check
+RSN40    EQU   X'00000040'  RMSSSI - SVCE table failed validity check
+RSN44    EQU   X'00000044'  RMSSSI - ESTAE environment create failed
+RSN48    EQU   X'00000048'  RMSSSI - ZXVT failed validity check
+RSN52    EQU   X'00000052'  RMSSSI - ZRMS subsystem is not active
+RSN56    EQU   X'00000056'  RMSSSI - Terminated abnormally
+RSN60    EQU   X'00000060'  RMSSSI - ALLOSSI terminated abnormally
+RSN64    EQU   X'00000064'  RMSSSI - UNALSSI terminated abnormally
+RSN68    EQU   X'00000068'  RMSWTO - Terminated abnormally
+RSN72    EQU   X'00000072'  RMSEOT - Terminated abnormally
+RSN76    EQU   X'00000076'  RMSCMD - Terminated abnormally
+RSN80    EQU   X'00000080'  RMSSSI - ABEND SC03 ABEND recovered
+RSN84    EQU   X'00000084'  RMSLOG - SVCE table failed validity check
+RSN88    EQU   X'00000088'  RMSLOG - ZSVT table failed validity check
+RSN92    EQU   X'00000092'  RMSSSI - SVCE table failed validity check
+RSN96    EQU   X'00000096'  RMSLOG - ESTAE environment create failed
+*
+RSN100   EQU   X'00000100'  RMSLOG - Terminated abnormally
+RSN104   EQU   X'00000104'  RMSLOG - TCBTOKEN returned nonzero RC
+RSN108   EQU   X'00000108'  RMSSVC - Task not authorized to issue SVC
+RSN112   EQU   X'00000112'  RMSSVC - RMSSVC terminated by FRR recovery
+RSN116   EQU   X'00000116'  RMSSVC - SVCTRCE token retrieve failed
+RSN120   EQU   X'00000120'  RMSSVC - SVCTRCE ZSVT address is zero
+RSN124   EQU   X'00000124'  RMSSVC - SVCTRCE ZSVT failed validity chek
+RSN128   EQU   X'00000128'  RMSSVC - SVCTRCE invalid trace ID offset
+RSN132   EQU   X'00000132'  RMSSVC - SVCTRCE ZSVT failed validity chek
+RSN136   EQU   X'00000136'  RMSSVC - SVCTRCE invalid trace ID value
+RSN140   EQU   X'00000140'  RMSSVC - SVCSVS AMODE=64 not supported
+RSN144   EQU   X'00000144'  RMSSVC - SVCSVS invalid structure detected
+RSN148   EQU   X'00000148'  RMSSVC - SVCSVS abnormally terminated
+RSN152   EQU   X'00000152'  RMSSVC - SVCHOOK 24-bit SVXE obtain error
+RSN156   EQU   X'00000156'  RMSSVC - SVCHOOK 31-bit SVXE obtain error
+RSN160   EQU   X'00000160'  RMSSVC - ZRWA storage optain error
+RSN164   EQU   X'00000164'  RMSSVC - ESTAE create failed
+RSN168   EQU   X'00000168'  RMSSVC - Caller issued SVC failed
+RSN172   EQU   X'00000172'  SVCXIT - TCBSVCA2 failed validity check
+RSN176   EQU   X'00000176'  SVCXIT - SVXE failed validity check
+RSN180   EQU   X'00000180'  SVCXIT - SVCID failed validity check
+RSN184   EQU   X'00000184'  SVCXIT - FCID failed validity check
+RSN188   EQU   X'00000188'  SVCXIT - XCID failed validit check
+RSN190   EQU   X'00000190'  RMSSSI - STAB table failed validity check
+RSN192   EQU   X'00000192'  -available
+RSN196   EQU   X'00000196'  -available
+RSN198   EQU   X'00000198'  -available
+*
+RSN200   EQU   X'00000200'  -available
+RSN204   EQU   X'00000204'  -available
+RSN208   EQU   X'00000208'  -available
+RSN212   EQU   X'00000212'  -available
+RSN216   EQU   X'00000216'  -available
+RSN220   EQU   X'00000220'  -available
+RSN224   EQU   X'00000224'  -available
+RSN228   EQU   X'00000228'  -available
+RSN232   EQU   X'00000232'  -available
+RSN236   EQU   X'00000236'  -available
+RSN240   EQU   X'00000240'  -available
+RSN244   EQU   X'00000244'  -available
+RSN248   EQU   X'00000248'  -available
+RSN252   EQU   X'00000252'  -available
+RSN256   EQU   X'00000256'  -available
+RSN260   EQU   X'00000260'  -available
+RSN264   EQU   X'00000264'  -available
+RSN268   EQU   X'00000268'  -available
+RSN272   EQU   X'00000272'  -available
+RSN276   EQU   X'00000276'  -available
+RSN280   EQU   X'00000280'  -available
+RSN284   EQU   X'00000284'  -available
+RSN288   EQU   X'00000288'  -available
+RSN292   EQU   X'00000292'  -available
+RSN296   EQU   X'00000296'  -available
+         MEND ,

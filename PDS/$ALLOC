@@ -1,0 +1,49 @@
+//$ALLOC   JOB ...
+//*
+//*******************************************************************/
+//*                                                                 */
+//* ZRMS DATASETS ALLOCATION JCL PROCEDURE                          */
+//*                                                                 */
+//* This JCL allocates the ZRMS subsystem datasets.                 */
+//*                                                                 */
+//* SRCLIB - Allocates assembler source dataset                     */
+//* OBJLIB - Allocates object source dataset                        */
+//*                                                                 */
+//* SEQLOG - Allocates sequential log dataset  (optional)           */
+//* PDSLOG - Allocates partitioned log dataset (optional)           */
+//*                                                                 */
+//* 1. Change hlq as required by your installation                  */
+//* 2. Change VOL=SER as required by your installation              */
+//*                                                                 */
+//*******************************************************************/
+//*
+//STEP1   EXEC PGM=IEFBR14
+//SRCLIB   DD  DSN=hlq.ZRMS.V1R1M0.SRCLIB,
+//             DISP=(,CATLG),
+//             UNIT=SYSDA,
+//             VOL=SER=??????,         <<---change
+//             SPACE=(TRK,(128,64,32)),
+//             DCB=(LRECL=80,RECFM=FB,BLKSIZE=6160,DSORG=PO)
+//*
+//OBJLIB   DD  DSN=hlq.ZRMS.V1R1M0.OBJLIB,
+//             DISP=(,CATLG),
+//             UNIT=SYSDA,
+//             VOL=SER=??????,         <<---change
+//             SPACE=(TRK,(128,64,32)),
+//             DCB=(LRECL=80,RECFM=FB,BLKSIZE=3120,DSORG=PO)
+//*
+//SEQLOG   DD  DSN=hlq.ZRMS.V1R1M0.SEQ.MONLOG,
+//             DISP=(,CATLG),
+//             UNIT=SYSDA,
+//             VOL=SER=??????,         <<---change
+//             SPACE=(TRK,(512,256)),
+//             DCB=(LRECL=80,RECFM=FB,BLKSIZE=19040,DSORG=PS)
+//*
+//PDSLOG   DD  DSN=hlq.ZRMS.V1R1M0.PDS.MONLOG,
+//             DISP=(,CATLG),
+//             UNIT=SYSDA,
+//             VOL=SER=??????,         <<---change
+//             SPACE=(TRK,(512,216,32)),
+//             DCB=(LRECL=80,RECFM=FB,BLKSIZE=19040,DSORG=PO)
+/*
+//

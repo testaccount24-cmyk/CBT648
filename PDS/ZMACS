@@ -1,0 +1,138 @@
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name:        ZMACS                                              */
+.*/*                                                                 */
+.*/* Function:    ZRMS subsystem service macro                       */
+.*/*                                                                 */
+.*/* Description: Generates the following macros:                    */
+.*/*                                                                 */
+.*/*              1. MID   - Module ID                               */
+.*/*              2. CNVX  - Hexadecimal data conversion             */
+.*/*              3. CNVD  - Decimal data conversion                 */
+.*/*              4. TOKN  - Name/Token Pair map                     */
+.*/*                                                                 */
+.*/* Copyright:   Ben Marino. 2021 - 2023 (unpublished)              */
+.*/*                                                                 */
+.*/*******************************************************************/
+.*---------------------------CHANGE LOG-------------------------------*
+.*                                                                    *
+.* ID    Rel    Date       Author        Comments                     *
+.*--------------------------------------------------------------------*
+.* @01 | V1R1 | 09242022 | Ben Marino  | Initial version              *
+.*     |      |          |             |                              *
+.*     |      |          |             |                              *
+.**********************************************************************
+.*-------+---------+---------+---------+---------+---------+---------+*
+         MACRO
+         ZMACS &TARGET,&SOURCE,                                        +
+               &GEN=,&TR=ZSVTZCNV,                                     +
+               &WRKREG=15,&DWORD=DSADWRD,&ID=MID,                      +
+               &TID=,&XID=,&SWKEY=YES,                                 +
+               &DSECT=NO
+.*
+         COPY  ZGBLS
+.*
+         AIF   ('&GEN' EQ 'MID').GENMID
+         AIF   ('&GEN' EQ 'CNVX').GENCNVX
+         AIF   ('&GEN' EQ 'CNVD').GENCNVD
+         AIF   ('&GEN' EQ 'TOKEN').GENTOKN
+         MNOTE 8,'*** ZMACS Invalid GEN= operand specified'
+         MEXIT ,
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name: MID                                                       */
+.*/*                                                                 */
+.*/* Function: ZRMS module entry constants                           */
+.*/*                                                                 */
+.*/* Notes: None                                                     */
+.*/*                                                                 */
+.*/*******************************************************************/
+.GENMID  ANOP  ,
+         COPY  ZGBLS
+         AIF   ('&DSECT' EQ 'NO').MID00
+&ID      DSECT ,
+         DC    AL4(0)                 .STM instruction
+         DC    AL4(0)                 .BRANCH instruction
+.*
+.MID00   ANOP  ,
+&ID.NAME DC    CL8'&SYSECT'           .module name
+&ID.SUB  DC    CL4'&SUB'              .server name
+&ID.REL  DC    CL8'&REL'              .release level
+&ID.APAR DC    CL8'&APAR'             .APAR number
+&ID.DATE DC    CL8'&SYSDATE'          .assembly date
+&ID.TIME DC    CL8'&SYSTIME'          .assembly time
+&ID.CPYR DC    CL40'&CPYRGHT'
+         SYSSTATE OSREL=ZOSV1R6
+         MEXIT ,
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name: CNVX                                                      */
+.*/*                                                                 */
+.*/* Function: Convert data to hexadecimal macro                     */
+.*/*                                                                 */
+.*/*******************************************************************/
+.GENCNVX ANOP  ,
+         UNPK  &TARGET.(L'&TARGET-1),&SOURCE
+         MVC   &TARGET+L'&TARGET-1(1),&SOURCE+L'&SOURCE-1
+         NI    &TARGET,X'0F'
+         MVZ   &TARGET+1(L'&TARGET-1),&TARGET
+         TR    &TARGET,&TR
+         MEXIT ,
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name: CNVD                                                      */
+.*/*                                                                 */
+.*/* Function: Convert data to decimal macro                         */
+.*/*                                                                 */
+.*/*******************************************************************/
+.GENCNVD ANOP  ,
+         L     &WRKREG,&SOURCE         .get data value
+         CVD   &WRKREG,&DWORD          .convert to decimal
+         OI    &DWORD+7,X'0F'          .fix sign
+         UNPK  &TARGET,&DWORD          .unpck it
+         MEXIT ,
+.*/*-----------------------------------------------------------------*/
+.*/*                                                                 */
+.*/* Name: TOKN                                                      */
+.*/*                                                                 */
+.*/* Function: System Level Name/Token map                           */
+.*/*                                                                 */
+.*/*-----------------------------------------------------------------*/
+.GENTOKN ANOP  ,
+*
+**       System Level Name/Token pair map
+*
+TOKN     DSECT ,
+TOKNNAME DS    0CL16'&TOKEN'           NAME
+TOKNMSAS DS    CL4                     -MSAS
+         DS    CL1                     -separator
+TOKNSUBN DS    CL4                     -subsystem name
+         DS    CL1                     -separator
+TOKNVERS DS    CL6                     -subsystem version
+*
+TOKNDATA DS    0XL16                   DATA
+TOKNZSVT DS    A                       -ZSVT address
+TOKNSSCT DS    A                       -SSCT address
+TOKNSRVA DS    A                       -ZRMSSRV EPA
+TOKNAVL1 DS    A                       -available
+TOKN@SZE EQU   *-TOKN                  Name/Token Pair Length
+*
+**       Address space level Name/token pair map
+*
+STOK     DSECT ,
+STOKNAME DS    0CL16'&STABTK'          NAME
+STOKINIT DS    CL4                     -STAB
+         DS    CL1                     -separator
+STOKSUBN DS    CL4                     -subsystem name
+         DS    CL1                     -separator
+STOKVERS DS    CL6                     -subsystem version
+*
+STOKDATA DS    0XL16                   DATA
+STOKSTAB DS    A                       STAB address
+STOKLGXE DS    A                       LGXE address
+STOKAVZ1 DS    A                       -available
+STOKAVZ2 DS    A                       -available
+STOK@SZE EQU   *-STOK
+STOK@MAX DS    0XL(32-STOK@SZE+1)      Name/Token pair restirction
+         MEXIT ,
+         MEND  ,

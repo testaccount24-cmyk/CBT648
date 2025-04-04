@@ -1,0 +1,63 @@
+*/*********************************************************************
+*/*
+*/*                          ZRMS
+*/*                  SUBSYSTEM INSTALLATION
+*/*                        PROCEDURE
+*/*
+*/*
+*/*  The following steps install the ZRMS subsystem:
+*/*
+*/*  1. Modify and submit job $ALLOC:
+*/*     Allocates SRCLIB and OBJLIB datasets required to assemble
+*/*     and link all ZRMS source modules.
+*/*
+*/*  2. Modify and submit job $LINK:
+*/*     Assembles and links ZRMS modules ZRMSINI and ZRMSSRV.
+*/*
+*/*  3. Modify and submit job $RACF:
+*/*     Defines the $ZRMSCLS class and resource profiles to your
+*/*     security server.
+*/*
+*/*  4. Add the ZRMS subsystem to PARMLIB member IEFSSNxx.
+*/*
+*/*     Change SVC=nnn with an SVC number in the range 200 to 255
+*/*     not in use by any other OEM product or application.
+*/*     The ZRMS subsystem dynamically installs the SVC routine
+*/*     at subsystem initialization time.
+*/*
+*/*     If you plan on saving ZRMS report data to SMF, specify
+*/*     an available SMF record number in the range of 200 to 255
+*/*     in ZRMS initialization parameter SMF=nnn.
+*/*
+*/*     SUBSYS SUBNAME(ZRMS)
+*/*            INITRTN(ZRMSINI)
+*/*            INITPARM('SVC=nnn,SMF=nnn')
+*/*
+*/*  5. Issue the following MVS command to refresh the LLA:
+*/*
+*/*     MODIFY LLA,REFRESH
+*/*
+*/*  6. Issue the SETSSI ADD command to dynamically define the
+*/*     ZRMS subsystem to MVS:
+*/*
+*/*     SETSSI ADD,SUB=ZRMS,I=ZRMSINI,P='SVC=nnn,SMF=nnn'
+*/*
+*/*  7. Successful ZRMS subsystem initialization will issue the
+*/*     following WTO messages:
+*/*
+*/*     ZRMS00I ZRMS Resource monitor subsys initialization in progress
+*/*     ZRMS20I ZRMS Service module ZRMSSRV added to dynamic-LPA
+*/*     ZRMS01I ZRMS Resource monitor subsys initialization complete
+*/*
+*/*
+*/*  CONTACT ME:
+*/*  Feel free to contact me if you have questions.
+*/*
+*/*  Ben Marino
+*/*  Freelance zArchitect|zMentor|zInstructor
+*/*  719.271.1344
+*/*  b2marino@outlook.com
+*/*  linkedin.com/in/ben-marino-40887915
+*/*
+*/*
+*/*********************************************************************

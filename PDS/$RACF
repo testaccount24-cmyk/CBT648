@@ -1,0 +1,66 @@
+//$RACF    JOB ...
+//*
+//*******************************************************************/
+//*                                                                 */
+//* Optional ZRMS subsystem security implementation JCL             */
+//*                                                                 */
+//*  This JCL procedure defines resource class $ZRMSCLS to RACF.    */
+//*                                                                 */
+//*    STEP1: Defines the $ZRMSCLS to the dynamic RACF class        */
+//*           descriptor table.                                     */
+//*                                                                 */
+//*    STEP2: Issues RACF command to activate class $ZRMSCLS.       */
+//*                                                                 */
+//*    STEP3: Issues RACF command to RACLIST class $ZRMSCLS.        */
+//*                                                                 */
+//*    STEP4: Defines the ZRMS resource names.                      */
+//*                                                                 */
+//*    STEP5: Grants permission to selected users.                  */
+//*                                                                 */
+//*******************************************************************/
+//*
+//*   RDEFINE $ZRMSCLS
+//*
+//STEP1    EXEC PGM=IKJEFT01,DYNAMNBR=30,REGION=0M
+//SYSTSPRT  DD SYSOUT=*
+//SYSTSIN   DD *
+ RDEFINE CDT $ZRMSCLS UACC(NONE) +
+    CDTINFO(DEFAULTUACC(NONE) FIRST(NATIONAL) MAXLENGTH(32) +
+    OTHER(ALPHA,NUMERIC,SPECIAL) POSIT(128) RACLIST(ALLOWED) +
+    SECLABELSREQUIRED(YES))
+/*
+//*
+//*   Activate $ZRMSCLS
+//*
+//STEP2    EXEC PGM=IKJEFT01,DYNAMNBR=30,REGION=0M
+//SYSTSPRT  DD SYSOUT=*
+//SYSTSIN   DD *
+ SETROPTS CLASSACT($ZRMSCLS)
+/*
+//*
+//*   RACLIST $ZRMSCLS
+//*
+//STEP3    EXEC PGM=IKJEFT01,DYNAMNBR=30,REGION=0M
+//SYSTSPRT  DD SYSOUT=*
+//SYSTSIN   DD *
+ SETROPTS RACLIST(CDT) REFRESH
+/*
+//*
+//*   RDEFINE ZRMS resource profiles
+//*
+//STEP4    EXEC PGM=IKJEFT01,DYNAMNBR=30,REGION=0M
+//SYSTSPRT  DD SYSOUT=*
+//SYSTSIN   DD *
+ RDEFINE $ZRMSCLS MONITOR.ZRMS.CMD UACC(NONE)
+ RDEFINE $ZRMSCLS MONITOR.ZRMS.JCL UACC(NONE)
+/*
+//*
+//*  Grant READ access to ZRMS command users
+//*
+//STEP5    EXEC PGM=IKJEFT01,DYNAMNBR=30,REGION=0M
+//SYSTSPRT  DD SYSOUT=*
+//SYSTSIN   DD *
+ PERMIT  MONITOR.ZRMS.CMD CLASS($ZRMSCLS) ID(userID) ACCESS(READ)
+ PERMIT  MONITOR.ZRMS.JCL CLASS($ZRMSCLS) ID(userID) ACCESS(READ)
+/*
+//

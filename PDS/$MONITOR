@@ -1,0 +1,158 @@
+*/*********************************************************************
+*/*
+*/*                       ZRMS
+*/*              RESOURCE MONITOR SUBSYSTEM
+*/*                   EXPLOITATION
+*/*
+*/* SUBSYS=ZRMS DD PARAMETERS:
+*/*  The ZRMS subsystem defines the following parameters
+*/*  to implement resource monitoring and reporting:
+*/*
+*/*  SUBSYS=(ZRMS,'DDname,
+*/*                RPT={S|D}
+*/*                SMF={Y|N}
+*/*                SVC={nnn,...|name,...}
+*/*                RES={nnn,...|name,...}
+*/*                SP={SQA|CSA|LSQA|JST|PVT|ALL|nnn')
+*/*
+*/*  ZRMS
+*/*   Specifies the ZRMS subsystem name.
+*/*
+*/*  DDname
+*/*   Specifies the monitor log DD name. The DD name can point to
+*/*   SYSOUT, sequential, or partitioned dataset member.
+*/*
+*/*  RPT={D|S}
+*/*   Specifies the monitor report type. "D" logs a detailed report.
+*/*   "S" logs a summary report. If not specified, the default "S".
+*/*
+*/*  SMF={N|Y}
+*/*   Specifies SMF recording option. "Y" logs monitor report to SMF.
+*/*   If not specified, the default is "N". When "Y" is specified,
+*/*   initialization option SMF=nnn must specify a user-defined SMF
+*/*   record number in the range of 200 to 255.
+*/*
+*/*  SVC={nnn|name}
+*/*   Specifies which SVCs you wish to monitor. "nnn" allows you to
+*/*   monitor SVCs by number. "name" allows you to monitor SVCs by
+*/*   name. You can combine both SVC numbers and SVC names.
+*/*
+*/*  DIS={nnn|name}
+*/*   Specifies which SVCs you wish to restrict. "nnn" allows you to
+*/*   restrict SVCs by number. "name" allows you to restrict SVCs by
+*/*   name. You can combine both SVC numbers and SVC names.
+*/*
+*/*  SP={nnn,...|nnn:nnn|SQA|CSA|LSQA|PVT|JST|ALL}
+*/*   Specifies which storage subpools you wish to monitor. The SP=
+*/*   parameter is only valid when specified in conjunction with
+*/*   GETMAIN/FREEMAIN SVCs.
+*/*
+*/*   {nnn,...}
+*/*   Allows you to specify the storage subpool by number. If you
+*/*   specify multiple subpools, separate them with comma.
+*/*
+*/*   SP=SQA
+*/*    Monitors E/SQA subppols 226,239,245,247,248.
+*/*
+*/*   SP=CSA
+*/*    Monitors E/CSA subpools 227,228,231,241.
+*/*
+*/*   SP=SQA,CSA
+*/*    Monitors E/SQA and E/CSA subpools.
+*/*
+*/*   SP=LSQA
+*/*    Monitors E/LSQA subpools 203-205,213-215,223-225,233-235,
+*/*    253-255.
+*/*
+*/*   SP=JST
+*/*    Monitors jobstep task subpools 129-132,226,244,249.
+*/*
+*/*   SP=PVT
+*/*    Monitors E/PRIVATE subpools 0-134,229,230,236,237,240-244,
+*/*    249-253.
+*/*
+*/*   SP=ALL
+*/*    Monitors subpools 0-255.
+*/*
+*/*
+*/* ZRMS SUBSYSTEM MONITOR EXAMPLES:
+*/*
+*/*  EXAMPLE 1:
+*/*   Monitor GETMAIN/FREEMAIN SVCs issued for subpool SQA, CSA, and
+*/*   LSQA. Log monitor report to PDS member REPORT, of dataset
+*/*   MONITOR.SVC.REPORT.
+*/*
+*/*   //STEP1   EXEC PGM=MYPGM
+*/*   //MONITOR  DD  SUBSYS=(ZRMS,'MONLOG,SVC=GETMAIN,FREEMAIN',
+*/*   //             'SP=SQA,CSA,LSQA')
+*/*   //MONLOG   DD  DSN=MONITOR.SVC.REPORT(REPORT),DISP=SHR
+*/*
+*/*  EXAMPLE 2:
+*/*   Monitor GETMAIN/FREEMAIN SVCs issued for subpools 129, 130, 131,
+*/*   132 by programs executing in STEP1. Monitor the MODESET SVC
+*/*   issued by programs running in STEP2.
+*/*
+*/*   //STEP1   EXEC PGM=GLPGM21
+*/*   //STEP1LG  DD  SUBSYS=(ZRMS,'MONLOG,SVC=GETMAIN,FREEMAIN',
+*/*   //             SP=129,130,131,132')
+*/*   //MONLOG   DD  DSN=GLPGM21.GETMAIN.FREEMAIN.LOG,DISP=SHR
+*/*   //*
+*/*   //STEP2   EXEC PGM=GLPGM27
+*/*   //STEP2LG  DD  SUBSYS=(ZRMS,'MONLOG,SVC=MODESET')
+*/*   //MONLOG   DD  DSN=GLPGM27.MODESET.LOG,DISP=SHR
+*/*
+*/*  EXAMPLE 3:
+*/*   Monitor GETMAIN/FREEMAIN SVCs by number and log detail report
+*/*   to USERLOG SYSOUT dataset.
+*/*
+*/*   //STEPA   EXEC PGM=USERPGM
+*/*   //MONITOR  DD  SUBSYS=(ZRMS,'USERLOG,RPT=D,SVC=4,5,10,120')
+*/*   //USERLOG  DD  SYSOUT=*
+*/*
+*/*  EXAMPLE 4:
+*/*   Disallow the MODESET SVC issued by programs running on behalf
+*/*   of STEP1. When a disallowed SVC is issued, the jobstep task
+*/*   is obnormally terminated with user completion code 2023 and
+*/*   reason code 00000108.
+*/*
+*/*   //STEP1   EXEC PGM=YOURPGM
+*/*   //MONITOR  DD  SUBSYS=(ZRMS,'MONLOG,DIS=MODESET')
+*/*   //MONLOG   DD  DUMMY
+*/*
+*/*  EXAMPLE 5:
+*/*   Monitor program management supervisor calls and log detail
+*/*   report to MONLOG SYSOUT dataset.
+*/*
+*/*   //STEP1   EXEC PGM=YOURPGM
+*/*   //MONITOR  DD  SUBSYS=(ZRMS,'PGMLOG,RPT=D',
+*/*                  SVC=LOAD,DELETE,LINK,XCTL,IDENTIFY')
+*/*   //PGMLOG   DD  SYSOUT=*
+*/*
+*/*  EXAMPLE 6:
+*/*   Monitor job management supervisor calls and log summary
+*/*   report to MONLOG SYSOUT dataset.
+*/*
+*/*   //STEP1   EXEC PGM=YOURPGM
+*/*   //MONITOR  DD  SUBSYS=(ZRMS,'MONLOG,RPT=S,SVC=ATTACH,DETACH')
+*/*   //MONLOG   DD  SYSOUT=*
+*/*
+*/*  EXAMPLE 7:
+*/*   Monitor system and subsystem commands and log report to SMF
+*/*   only.
+*/*
+*/*   //STEP1   EXEC PGM=YOURPGM
+*/*   //MONITOR  DD  SUBSYS=(ZRMS,'DUMMYLOG,SMF=Y,SVC=MGCR,MGCRE')
+*/*   //DUMMYLOG DD  DUMMY
+*/*
+*/*
+*/* CONTACT ME:
+*/*  Feel free to contact me if you have questions.
+*/*
+*/*  Ben Marino
+*/*  Freelance zArchitect|zMentor|zInstructor
+*/*  719.271.1344
+*/*  b2marino@outlook.com
+*/*  linkedin.com/in/ben-marino-40887915
+*/*
+*/*
+*/*********************************************************************

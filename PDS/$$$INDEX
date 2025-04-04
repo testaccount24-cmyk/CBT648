@@ -1,0 +1,13 @@
+*/*********************************************************************
+*/*                                                                   *
+*/*  $$README - YOU MUST READ THIS!!!                                 *
+*/*  $DOC     - ZRMS subsystem documentation                          *
+*/*  $ALLOC   - Dataset allocation JCL procedure                      *
+*/*  $LINK    - Assemble and link JCL procedure                       *
+*/*  $INSTALL - ZRMS subsystem installation procedure                 *
+*/*  $RACF    - Security implementation JCL procedure                 *
+*/*  $OPTIONS - ZRMS initialization options                           *
+*/*  $COMNDS  - ZRMS display and action commands                      *
+*/*  $MONITOR - Resource monitoring JCL examples                      *
+*/*                                                                   *
+*/*********************************************************************

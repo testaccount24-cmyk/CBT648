@@ -1,0 +1,96 @@
+         MACRO
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Nane:        ZRETRY                                             */
+.*/*                                                                 */
+.*/* Function:    ZRMS subsystem recovery retry macro                */
+.*/*                                                                 */
+.*/* Description: Used by TCB-mode and SRB-mode routines             */
+.*/*              to set and reset retry points within a routine.    */
+.*/*                                                                 */
+.*/* Copyright:   Ben Marino. 2021 - 2023 (unpublished)              */
+.*/*                                                                 */
+.*/*******************************************************************/
+.*---------------------------CHANGE LOG-------------------------------*
+.*                                                                    *
+.* ID    Rel    Date       Author        Comments                     *
+.*--------------------------------------------------------------------*
+.* @01 | V1R1 | 09242022 | Ben Marino  | Initial version              *
+.* @02 | V1R1 | 03312023 | Ben Marino  | Serviceability enhancements  *
+.*     |      |          |             |                              *
+.*     |      |          |             |                              *
+.**********************************************************************
+.*-------+---------+---------+---------+---------+---------+---------+*
+         ZRETRY &LABEL,&SRV=,&RSN=,&EPA=10,                            +
+               &WTO=YES,&SDUMP=YES,&LOGREC=NO                      @02C
+.*
+         LCLC  &NORTY
+&NORTY   SETC  'RTY'.'&SYSNDX'
+.*
+         AIF   ('&LABEL' EQ '').ERR01
+         AIF   ('&LABEL' EQ 'OFF').RTYOFF
+.*
+.RTY000  ANOP  ,
+         XC    ZRWAFLG1,ZRWAFLG1       .retry flags
+         AIF   ('&SRV' EQ '').RTY002
+         MVC   ZRWASECT,=CL8'&SRV'     .service routine
+         AGO   .RTY004
+.*
+.RTY002  ANOP  ,
+         MVC   ZRWASECT,4(&EPA)        .service routine
+.*
+.RTY004  ANOP  ,
+         AIF   ('&SDUMP' EQ 'YES').RTY005
+         AIF   ('&SDUMP' NE 'NO').ERR02
+         OI    ZRWAFLG1,ZRWA@NDP       .SDUMP=NO
+.*
+.RTY005  ANOP  ,
+         AIF   ('&WTO' EQ 'YES').RTY010
+         AIF   ('&WTO' NE 'NO').ERR03
+         OI    ZRWAFLG1,ZRWA@NWT       .WTO=NO
+.*
+.RTY010  ANOP  ,
+         AIF   ('&LOGREC' EQ 'NO').RTY015                          @02A
+         AIF   ('&LOGREC' NE 'YES').ERR04                          @02A
+         OI    ZRWAFLG1,ZRWA@LOG       .LOGREC=YES                 @02A
+.*
+.RTY015  ANOP  ,
+         AIF   ('&RSN' EQ '').RTY025
+         AIF   ('&RSN'(1,1) EQ '(').RTY020
+         MVC   ZRWARSN,&RSN            .set RSN
+         AGO   .RTY025
+.*
+.RTY020  ANOP  ,
+         ST    &RSN,ZRWARSN            .set RSN
+.*
+.RTY025  ANOP  ,
+         AIF   ('&LABEL'(1,1) NE '(').RTY030                       @02A
+         LR    15,&LABEL               .retry address              @02A
+         AGO   .RTY099                                             @02C
+.*
+.RTY030  ANOP  ,
+         LA    15,&LABEL               .retry address
+.*
+.RTY099  ANOP  ,
+         BSM   15,0                    .AMODE
+         ST    15,ZRWARTRY             .save address
+         STM   0,15,ZRWAGPRS           .save GPRs
+         STMH  0,15,ZRWAHGRS           .save high GPRs
+         STAM  0,15,ZRWAARS            .save ARs
+         MEXIT ,
+*
+.RTYOFF  ANOP  ,
+         XC    ZRWAFLG1,ZRWAFLG1       .clear flags
+         XC    ZRWARTRY,ZRWARTRY       .zero retry address
+         MEXIT ,
+.*
+.**      Macro Notes
+.*
+.ERR01   MNOTE 8,'*** ZRETRY - Retry label specification error'
+         MEXIT ,
+.ERR02   MNOTE 8,'*** ZRETRY - SDUMP operand specification error'
+         MEXIT ,
+.ERR03   MNOTE 8,'*** ZRETRY - WTO operand specification error'
+         MEXIT ,
+.ERR04   MNOTE 8,'*** ZRETRY - LOGREC operand specification error'
+         MEND  ,

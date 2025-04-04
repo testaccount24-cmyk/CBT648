@@ -1,0 +1,176 @@
+         MACRO
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Nane: ZTRC                                                      */
+.*/*                                                                 */
+.*/* Function:    ZRMS subsystem code-path trace macro               */
+.*/*                                                                 */
+.*/* Description: Used by TCB-mode and SRB-mode subsystem routines   */
+.*/*              to capture code-path trace data crumbs.            */
+.*/*                                                                 */
+.*/* Copyright:   Ben Marino. 2021 - 2023 (unpublished)              */
+.*/*                                                                 */
+.*/*******************************************************************/
+.*---------------------------CHANGE LOG-------------------------------*
+.*                                                                    *
+.* ID    Rel    Date       Author        Comments                     *
+.*--------------------------------------------------------------------*
+.* @01 | V1R1 | 09242022 | Ben Marino  | Initial version              *
+.* @02 | V1R1 | 01272023 | Ben Marino  | Serviceability enhancements  *
+.*     |      |          |             |                              *
+.*     |      |          |             |                              *
+.**********************************************************************
+.*-------+---------+---------+---------+---------+---------+---------+*
+         ZTRCE &EP=,&ZSVT=11,&LINKAGE=BRANCH,&WRKREG=14,               +
+               &INI=,&CMD=,&WTO=,&SSI=,&SVS=,&SVC=,&PAR=,&ALO=,&UNL=,  +
+               &LOG=,&EOT=,&SPN=
+         COPY  ZGBLS
+.*
+         LCLC  &TIV
+         LCLC  &TID
+&TIV     SETC  ' '
+&TID     SETC  ' '
+         LCLC  &TRZ
+&TRZ     SETC  'TRZ'.'&SYSNDX'
+.*
+         AIF   ('&TRACE' EQ 'NO').TRCXIT
+         AIF   ('&TRACE' NE 'YES').ERR00
+.*
+.**      INI= expansion
+.*
+.TRC000  ANOP  ,
+         AIF   ('&INI' EQ '').TRC100
+&TIV     SETC  '&INI'
+&TID     SETC  'ZTRCINI'
+         AGO   .TRC900
+.*
+.**      CMD= expansion
+.*
+.TRC100  ANOP  ,
+         AIF   ('&CMD' EQ '').TRC105
+&TIV     SETC  '&CMD'
+&TID     SETC  'ZTRCCMD'   '
+         AGO   .TRC900
+.*
+.**      EOT= expansion
+.*
+.TRC105  ANOP  ,
+         AIF   ('&EOT' EQ '').TRC110
+&TIV     SETC  '&EOT'
+&TID     SETC  'ZTRCEOT'   '
+         AGO   .TRC900
+.*
+.**      WTO= expansion
+.*
+.TRC110  ANOP  ,
+         AIF   ('&WTO' EQ '').TRC200
+&TIV     SETC  '&WTO'
+&TID     SETC  'ZTRCWTO'   '
+         AGO   .TRC900
+.*
+.**      SSI= expansion
+.*
+.TRC200  ANOP  ,
+         AIF   ('&SSI' EQ '').TRC300
+&TIV     SETC  '&SSI'
+&TID     SETC  'ZTRCSSI'
+         AGO   .TRC900
+.*
+.**      SVS= expansion
+.*
+.TRC300  ANOP  ,
+         AIF   ('&SVS' EQ '').TRC400
+&TIV     SETC  '&SVS'
+&TID     SETC  'ZTRCSVS'
+         AGO   .TRC900
+.*
+.**      SVC= expansion
+.*
+.TRC400  ANOP  ,
+         AIF   ('&SVC' EQ '').TRC410
+&TIV     SETC  '&SVC'
+&TID     SETC  'ZTRCSVC'
+         AGO   .TRC900
+.*
+.**      LOG= expansion
+.*
+.TRC410  ANOP  ,
+         AIF   ('&LOG' EQ '').TRC500
+&TIV     SETC  '&LOG'
+&TID     SETC  'ZTRCLOG'
+         AGO   .TRC900
+.*
+.**      ALO= expansion
+.*
+.TRC500  ANOP  ,
+         AIF   ('&ALO' EQ '').TRC600
+&TIV     SETC  '&ALO'
+&TID     SETC  'ZTRCALO'
+         AGO   .TRC900
+.*
+.**      UNL= expansion
+.*
+.TRC600  ANOP  ,
+         AIF   ('&UNL' EQ '').TRC700
+&TIV     SETC  '&UNL'
+&TID     SETC  'ZTRCUNL'
+         AGO   .TRC900
+.*
+.**      PAR= expansion
+.*
+.TRC700  ANOP  ,
+         AIF   ('&PAR' EQ '').TRC800
+&TIV     SETC  '&PAR'
+&TID     SETC  'ZTRCPAR'
+         AGO   .TRC900
+.*
+.**      SPN= expansion
+.*
+.TRC800  ANOP  ,
+         AIF   ('&SPN' EQ '').ERR01
+&TIV     SETC  '&SPN'
+&TID     SETC  'ZTRCSPN'
+.*
+.**      LINKAGE=BRANCH trace call
+.*
+.TRC900  ANOP  ,
+         AIF   ('&LINKAGE' NE 'BRANCH').TRC999
+         LA    0,ZTRCXID&TIV-ZSVT        .crumb value address offset
+         LA    1,&TID&TIV-ZSVT           .crumb location address offset
+.*
+         AIF   ('&EP' EQ '').TRC910                                @02A
+         L     &WRKREG,&EP               .READONLY ZSVT            @02A
+         AGO   .TRC920                                             @02A
+.*
+.TRC910  ANOP  ,
+         L     &WRKREG,=V(RMSSRV)        .READONLY ZSVT
+.*
+.TRC920  ANOP  ,
+         LA    &WRKREG,ZSVTRACE-ZSVT(,&WRKREG)  .LINKAGE=BRANCH
+         BSM   &WRKREG,0                 .AMODE
+         BASR  14,&WRKREG                .trace
+         AGO   .TRCXIT
+.*
+.**      LINKAGE=LOCAL trace call
+.*
+.TRC999  ANOP  ,
+         AIF   ('&LINKAGE' NE 'LOCAL').ERR02
+         CLC   ZSVTID-ZSVT(4,&ZSVT),=CL4'ZSVT'                     @02A
+         BNE   &TRZ                                                @02A
+         MVI   &TID&TIV-ZSVT(&ZSVT),C'&TIV'  .init data crumb      @02A
+&TRZ     DS    0H
+.*
+.**      Macro Exit
+.*
+.TRCXIT  ANOP  ,
+         MEXIT ,
+.*
+.**      Macro Notes
+.*
+.ERR00   MNOTE 8,'*** ZTRCE - Invalid TRACE global specified'
+         MEXIT ,
+.ERR01   MNOTE 8,'*** ZTRCE - Invalid trace ID specified'
+         MEXIT ,
+.ERR02   MNOTE 8,'*** ZTRCE - Invalid LINKAGE specified'
+         MEXIT ,
+         MEND

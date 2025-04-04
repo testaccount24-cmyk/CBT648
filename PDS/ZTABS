@@ -1,0 +1,1811 @@
+         MACRO
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name:        ZTABS                                              */
+.*/*                                                                 */
+.*/* Function:    ZRMS subsystem table generation macro              */
+.*/*                                                                 */
+.*/* Description: Generates the following tables:                    */
+.*/*                                                                 */
+.*/*               1. SSI vector table                               */
+.*/*               2. MLWTO data lines table                         */
+.*/*               3. CMD listener routine table                     */
+.*/*               4. SST listener routine table                     */
+.*/*               5. SVC screening control table                    */
+.*/*               6. SVN SVC macro name table                       */
+.*/*               7. SPN subpool attributes table                   */
+.*/*                                                                 */
+.*/* Copyright:   Ben Marino. 2021 - 2023 (unpublished)              */
+.*/*                                                                 */
+.*/*******************************************************************/
+.*---------------------------CHANGE LOG-------------------------------*
+.*                                                                    *
+.* ID    Rel    Date       Author        Comments                     *
+.*--------------------------------------------------------------------*
+.* @01 | V1R1 | 09272022 | Ben Marino  | Initial version              *
+.* @02 | V1R1 | 02052023 | Ben Marino  | Serviceability enhancements  *
+.*     |      |          |             |                              *
+.*     |      |          |             |                              *
+.**********************************************************************
+.*-------+---------+---------+---------+---------+---------+---------+*
+&ZID     ZTABS &GEN=,                                                  +
+               &TYPE=,                                                 +
+               &EP=,                                                   +
+               &FC=,                                                   +
+               &KEY=,                                                  +
+               &CODE=,                                                 +
+               &DATA=,                                                 +
+               &MODE=,                                                 +
+               &PCID=,                                                 +
+               &SAF=,                                                  +
+               &COMMAND=,                                              +
+               &LENGTH=,                                               +
+               &T=MSG,                                                 +
+               &DSECT=NO
+.*
+         COPY  ZGBLS
+.*
+         AIF   ('&GEN' EQ 'SSI').GENSSI
+         AIF   ('&GEN' EQ 'CMD').GENCMD
+         AIF   ('&GEN' EQ 'WTO').GENWTO
+         AIF   ('&GEN' EQ 'SST').GENSST
+         AIF   ('&GEN' EQ 'SVCTBLE').GENSVX
+         AIF   ('&GEN' EQ 'SVNTBLE').GENSVN
+         AIF   ('&GEN' EQ 'SPNTBLE').GENSPN
+         AIF   ('&GEN' EQ 'SVMACRO').GENMAC
+         MNOTE 8,'*** ZTABS Invalid GEN= operand specified'
+         MEXIT ,
+.*--------------------------------------------------------------------*
+.*                                                                    *
+.*       Generate SSVT vector table                                   *
+.*                                                                    *
+.*       Function Code:  4 EOT                                        *
+.*                       6 DEALLOCATE                                 *
+.*                       7 UNALLOCATION                               *
+.*                       9 WTO/R                                      *
+.*                      10 MGCR/E                                     *
+.*                      16 OPEN                                       *
+.*                      17 CLOSE                                      *
+.*                      18 CHECKPOINT                                 *
+.*                      19 RESTART                                    *
+.*                      38 CONVERTER EXIT                             *
+.*                      39 ALLOCATE GROUP                             *
+.*                      50 EARLY EOT                                  *
+.*                                                                    *
+.*-------+---------+---------+---------+---------+---------+---------+*
+.GENSSI  ANOP  ,
+         AIF   ('&DSECT' EQ 'NO').SSINODS
+         AIF   ('&DSECT' NE 'YES').SSI01
+ZSSVT    DSECT
+         AGO   .SSIYESD
+.SSINODS ANOP  ,
+ZSSVT    DS    0F
+.SSIYESD ANOP  ,
+         DC    H'0'          reserved
+         DC    H'2'          function routines
+ZSSVTFC  DC    XL256'0'
+ZSSAL6   ORG   ZSSVTFC+5     FC=06 - ALLOCATION
+         DC    XL1'01'
+ZSSAL7   ORG   ZSSVTFC+6     FC=07 - UNALLOCATION
+         DC    XL1'01'
+ZSSWT    ORG   ZSSVTFC+8     FC=09 - WTO/R
+         DC    XL1'01'
+ZSSCM    ORG   ZSSVTFC+9     FC=10 - MGCR/E
+         DC    XL1'02'
+ZSSDA16  ORG   ZSSVTFC+15    FC=16 - OPEN
+         DC    XL1'01'
+ZSSDA17  ORG   ZSSVTFC+16    FC=17 - CLOSE
+         DC    XL1'01'
+ZSSDA18  ORG   ZSSVTFC+17    FC=18 - CHECKPOINT
+         DC    XL1'01'
+ZSSDA19  ORG   ZSSVTFC+18    FC=19 - RESTART
+         DC    XL1'01'
+ZSSCI    ORG   ZSSVTFC+37    FC=38 - CONVERTER
+         DC    XL1'01'
+ZSSAG    ORG   ZSSVTFC+38    FC=39 - ALLOCATION GROUP
+         DC    XL1'01'
+ZSSETF   ORG   ZSSVTFC+49    FC=50 - EARLY END-OF-TASK
+         DC    XL1'01'
+ZSSAL80  ORG   ZSSVTFC+80    FC=81 - UNAUTHORIZED ALLOCATION
+         DC    XL1'01'
+         ORG   ,
+ZSSVTMX  EQU   *-ZSSVT
+ZRMSSSI  DC    V(RMSSSI)     01 - RMSSSI listener routine
+ZRMSCMD  DC    V(RMSCMD)     02 - RMSCMD listener routine
+ZRMSRV3  DC    A(0)          03 - reserved
+ZRMSRV4  DC    A(0)          04 - reserved
+         ORG   ,
+ZSSVT@SZ EQU   *-ZSSVT       SSVT size
+         MEXIT ,
+.*
+.**      Macro Notes
+.*
+.SSI01   MNOTE 8,'*** SSI - DSECT operand specification error'
+         MEXIT ,
+.*--------------------------------------------------------------------*
+.*                                                                    *
+.*       Generate Multiline WTO data lines                            *
+.*                                                                    *
+.*-------+---------+---------+---------+---------+---------+---------+*
+.GENWTO  ANOP  ,
+         AIF   ('&DSECT' EQ 'NO').NEXTC
+*
+**       MLWTO Control Line
+*
+&T.C     DSECT ,
+         AGO   .NEXTC1
+.NEXTC   ANOP  ,
+&T.C     DS    0F
+.NEXTC1  ANOP  ,
+&T.CTLEN DC    AL2(38)                .control line text length
+&T.CMCSF DC    XL2'0040'              .MCS flags
+&T.CTEXT DS    0CL34                  .control line text
+&T.CTMID DC    CL8'ZRMS00I'           .message ID
+&T.CTSUB DC    CL4'ZRMS'              .server name
+&T.CTBLK DC    CL1' '                 .blank
+&T.CTCMD DC    CL21' '                .text data
+&T.CLTYP DC    XL2'8000'              .line type
+&T.CBYTE DC    X'00'                  .?
+&T.CTOTL DC    AL1(10)                .default number of data lines
+&T.C@SZE EQU   *-&T.C                 .control line size
+*
+**       MLWTO Data Line
+*
+         AIF   ('&DSECT' EQ 'NO').NEXTD
+&T.D     DSECT ,
+         AGO   .NEXTD1
+.NEXTD   ANOP  ,
+&T.D     EQU   *
+.NEXTD1  ANOP  ,
+&T.DTLEN DC    AL2(74)                .data line length
+&T.DLTYP DC    XL2'2000'              .line type
+&T.DDATA DC    CL70' '                .text data
+&T.D@LEN EQU   *-&T.DDATA             .text length
+&T.D@SZE EQU   *-&T.D                 .data line size
+&T.XSIZE EQU   24576                  .24K (256 data lines)
+&T.XMAXL EQU   24576/&T.D@SZE-2       .max number of data lines
+*
+**       MLWTO End Line
+*
+         AIF   ('&DSECT' EQ 'NO').NEXTE
+&T.E     DSECT ,
+         AGO   .NEXTE1
+.NEXTE   ANOP  ,
+&T.E     EQU   *
+.NEXTE1  ANOP  ,
+&T.ETLEN DC    AL2(74)                .end line length
+&T.ELTYP DC    XL2'3000'              .line type
+&T.ETEXT DC    CL70'END'              .text data
+&T.E@SZE EQU   *-&T.E                 .line length
+         MEXIT ,
+.*--------------------------------------------------------------------*
+.*                                                                    *
+.*       Generate CMD command table                                   *
+.*                                                                    *
+.*-------+---------+---------+---------+---------+---------+---------+*
+.GENCMD  ANOP  ,
+         AIF   ('&DSECT' EQ 'YES').CMDLIST
+         AIF   ('&DSECT' NE 'NO').CMD00
+         AIF   ('&TYPE' EQ 'INITIAL').CMDINIT
+         AIF   ('&TYPE' EQ 'FINAL').CMDFINI
+         AIF   ('&TYPE' EQ 'ENTRY').CMDENTY
+         AGO   .CMD01
+.*
+.**      TYPE=INITIAL
+.*
+.CMDINIT ANOP  ,
+         DS    0F                    .initial table entry
+         MEXIT ,
+.*
+.**      TYPE=ENTRY
+.*
+.CMDENTY ANOP  ,
+         DS    0F
+         AIF   ('&EP' EQ '').CMD01
+         DC    A(&EP)                .EPA
+         AIF   ('&SAF' EQ '').CMDX00
+         AIF   ('&SAF' EQ 'CALL').CMDX80
+         AIF   ('&SAF' NE 'NOCALL').CMD04
+.*
+.CMDX00  ANOP  ,
+         DC    XL1'00'               .SAF=NOCALL
+         AGO   .CMDX99
+.*
+.CMDX80  ANOP  ,
+         DC    XL1'80'               .SAF=CALL
+.*
+.CMDX99  ANOP  ,
+         DC    AL1(0)                .reserved
+         AIF   ('&LENGTH' EQ '').CMD02
+         DC    AL2(&LENGTH)          .length
+         AIF   ('&COMMAND' EQ '').CMD03
+         DC    CL16&COMMAND          .command
+         MEXIT ,
+.*
+.**      TYPE=FINAL
+.*
+.CMDFINI ANOP  ,
+         DS    0F                    .
+         DC    AL4(-1)               .final table entry
+         MEXIT ,
+.*
+.**      DSECT=YES
+.*
+.CMDLIST ANOP  ,
+COMMAND  DSECT ,
+CMDEPA   DS    A                     .EPA
+CMDSAF   DS    XL1                   .SAF={CALL|NO}
+CMD@NO   EQU   X'00'                 .SAF=NOCALL
+CMD@CALL EQU   X'80'                 .SAF=CALL
+CMDRSV   DS    AL1                   .-reserved
+CMDLEN   DS    AL2                   .length
+CMDTEXT  DS    CL16                  .command
+CMD@SZE  EQU   *-COMMAND             .entry size
+         MEXIT ,
+.*
+.**      Macro Notes
+.*
+.CMD00   MNOTE 8,'*** CMD invalid DSECT operand specified'
+         MEXIT ,
+.CMD01   MNOTE 8,'*** CMD invalid EP operand specified'
+         MEXIT ,
+.CMD02   MNOTE 8,'*** CMD invalid LENGTH operand specified'
+         MEXIT ,
+.CMD03   MNOTE 8,'*** CMD invalid COMMAND operand specified'
+         MEXIT ,
+.CMD04   MNOTE 8,'*** CMD invalid SAF operand specified'
+         MEXIT ,
+.*--------------------------------------------------------------------*
+.*                                                                    *
+.*       Generate SST listener table                                  *
+.*                                                                    *
+.*-------+---------+---------+---------+---------+---------+---------+*
+.GENSST  ANOP  ,
+         AIF   ('&DSECT' EQ 'YES').SSTLIST
+         AIF   ('&DSECT' NE 'NO').SST00
+         AIF   ('&TYPE' EQ 'INITIAL').SSTINIT
+         AIF   ('&TYPE' EQ 'FINAL').SSTFINI
+         AIF   ('&TYPE' EQ 'ENTRY').SSTENTY
+         AGO   .SST01
+.*
+.**      TYPE=INITIAL
+.*
+.SSTINIT ANOP  ,
+         DS    0F                    .initial table entry
+         MEXIT ,
+.*
+.**      TYPE=ENTRY
+.*
+.SSTENTY ANOP  ,
+         DS    0F
+         AIF   ('&EP' EQ '').SST01   .
+         DC    A(&EP)                .EPA
+         DC    AL2(&FC)              .function code
+         DC    XL1'&KEY.0'           .function key
+.*
+.SSTSAF  ANOP  ,
+         AIF   ('&SAF' EQ '').SSTX00
+         AIF   ('&SAF' EQ 'CALL').SSTX80
+         AIF   ('&SAF' NE 'NOCALL').SAF02
+.*
+.SSTX00  ANOP  ,
+         DC    XL1'00'               .SAF=NOCALL
+         AGO   .SSTXIT
+.*
+.SSTX80  ANOP  ,
+         DC    XL1'80'               .SAF=CALL
+.*
+.SSTXIT  ANOP  ,
+         MEXIT ,
+.*
+.**      TYPE=FINAL
+.*
+.SSTFINI ANOP  ,
+         DS    0F                    .
+         DC    AL4(-1)               .final table entry
+         MEXIT ,
+.*
+.**      DSECT=YES
+.*
+.SSTLIST ANOP  ,
+SST      DSECT ,
+SSTEPA   DS    A                     .EPA
+SSTFC    DS    AL2                   .function code
+SSTKEY   DS    XL1                   .function routine key
+SSTSAF   DS    AL1                   .SAF={CALL|NO}
+SST@NO   EQU   X'00'                 .SAF=NOCALL
+SST@CALL EQU   X'80'                 .SAF=CALL
+SST@SIZE EQU   *-SST                 .entry size
+         MEXIT ,
+.*
+.**      Macro Notes
+.*
+.SST01   MNOTE 8,'*** SST invalid EP operand specified'
+         MEXIT ,
+.SST02   MNOTE 8,'*** SST invalid SAF operand specified'
+         MEXIT ,
+.*--------------------------------------------------------------------*
+.*                                                                    *
+.*       Generate MSG listener table                                  *
+.*                                                                    *
+.*-------+---------+---------+---------+---------+---------+---------+*
+.GENMSG  ANOP  ,
+         AIF   ('&DSECT' EQ 'YES').MSGLIST
+         AIF   ('&DSECT' NE 'NO').MSG00
+         AIF   ('&TYPE' EQ 'INITIAL').MSGINIT
+         AIF   ('&TYPE' EQ 'FINAL').MSGFINI
+         AIF   ('&TYPE' EQ 'ENTRY').MSGENTY
+         AGO   .MSG01
+.*
+.**      TYPE=INITIAL
+.*
+.MSGINIT ANOP  ,
+         DS    0F                    .initial table entry
+         MEXIT ,
+.*
+.**      TYPE=ENTRY
+.*
+.MSGENTY ANOP  ,
+         DS    0F
+         AIF   ('&EP' EQ '').MSG01   .
+         DC    A(&EP)                .EPA
+         DC    A(0)                  .reserved
+         MEXIT ,
+.*
+.**      TYPE=FINAL
+.*
+.MSGFINI ANOP  ,
+         DS    0F                    .
+         DC    AL4(-1)               .final table entry
+         MEXIT ,
+.*
+.**      DSECT=YES
+.*
+.MSGLIST ANOP  ,
+MSG      DSECT ,
+MSGEPA   DS    A                     .EPA
+MSGRSV1  DS    A                     .-reserved
+MSG@SIZE EQU   *-MSG                 .entry size
+         MEXIT ,
+.*
+.**      Macro Notes
+.*
+.MSG01   MNOTE 8,'*** MSG invalid EP operand specified'
+         MEXIT ,
+*/*******************************************************************/
+*/*                                                                 */
+*/* Name:         SVCSVX                                            */
+*/*                                                                 */
+*/* Description:  SVC screening structure map                       */
+*/*                                                                 */
+*/* SVX:          One for every SVC screened TCB                    */
+*/*                                                                 */
+*/* SVCE:         One for every SVC screened address space.         */
+*/*                                                                 */
+*/* Restrictions: All offsets fixed by architecture                 */
+*/*                                                                 */
+*/* Restrictions: None                                              */
+*/*                                                                 */
+*/* Copyright:    Ben Marino. 2021 - 2023 (unpublished)             */
+*/*                                                                 */
+*/*******************************************************************/
+.GENSVX  ANOP  ,
+         AIF   ('&DSECT' EQ 'YES').YDSECT
+         AGO   .NDSECT
+.YDSECT  ANOP  ,
+SVCE     DSECT ,
+         AGO   .GOSVCE
+.NDSECT  ANOP  ,
+SVCE     DS    0D
+.GOSVCE  ANOP  ,
+*
+**       SVC Screening Table
+*
+SVCETAB  DS    0D
+SVCESVS  DC    V(SVCSVS)     SVC entry address
+SVCETYPE DC    XL2'C200'     SVC type 3/4 - non-preemptive
+SVCELCKS DC    XL2'8000'     SVC requires LOCAL lock
+SVCE@ENZ EQU   *-SVCETAB     SVC table entry size
+         DS    0D
+SVCETABE DS    0XL256        SVC table entries
+SVCE0    DC    X'80'         -T1 -EXCP XDAP
+SVCE1    DC    X'80'         -T1 -WAIT WAITR PRTOV
+SVCE2    DC    X'80'         -T1 -POST
+SVCE3    DC    X'80'         -T1 -EXIT  ***DONOT SCREEN***
+SVCE4    DC    X'80'        *-T1 -GETMAIN
+SVCE5    DC    X'80'        *-T1 -FREEMAIN
+SVCE6    DC    X'80'        *-T2 -LINK LINKX
+SVCE7    DC    X'80'        *-T2 -XCTL XCTLX
+SVCE8    DC    X'80'        *-T2 -LOAD
+SVCE9    DC    X'80'        *-T2 -DELETE
+SVCE10   DC    X'80'        *-T1 -GETMAIN FREEMAIN
+SVCE11   DC    X'80'        *-T3 -TIME
+SVCE12   DC    X'80'        *-T2 -SYNCH SYNCHX
+SVCE13   DC    X'80'         -T4 -ABEND  ***DONOT SCREEN***
+SVCE14   DC    X'80'         -T3 -SPIE
+SVCE15   DC    X'80'         -T1 -ERREXCP
+SVCE16   DC    X'80'         -T2 -PURGE
+SVCE17   DC    X'80'        *-T3 -RESTORE
+SVCE18   DC    X'80'        *-T2 -BLDL FIND
+SVCE19   DC    X'80'        *-T4 -OPEN
+SVCE20   DC    X'80'        *-T4 -CLOSE
+SVCE21   DC    X'80'        *-T3 -STOW
+SVCE22   DC    X'80'        *-T4 -OPEN (TYPE=J)
+SVCE23   DC    X'80'        *-T4 -CLOSE (TYPE=T)
+SVCE24   DC    X'80'        *-T3 -DEVTYPE
+SVCE25   DC    X'80'         -T3 -TRKBAL
+SVCE26   DC    X'80'         -T4 -CATALOG INDEX LOCATE
+SVCE27   DC    X'80'        *-T3 -OBTAIN
+SVCE28   DC    X'80'         -reserved
+SVCE29   DC    X'80'        *-T3 -SCRATCH
+SVCE30   DC    X'80'        *-T3 -RENAME
+SVCE31   DC    X'80'         -T4 -FEOV
+SVCE32   DC    X'80'         -T4 -REALLOC
+SVCE33   DC    X'80'         -T2 -IOHALT
+SVCE34   DC    X'80'        *-T4 -MGCR MGCRE QEDIT
+SVCE35   DC    X'80'         -T4 -WTO WTOR
+SVCE36   DC    X'80'         -T4 -WTL
+SVCE37   DC    X'80'         -T2 -SEGLD SEGWT
+SVCE38   DC    X'80'         -reserved
+SVCE39   DC    X'80'         -T3 -LABEL
+SVCE40   DC    X'80'        *-T3 -EXTRACT
+SVCE41   DC    X'80'        *-T3 -IDENTIFY
+SVCE42   DC    X'80'        *-T2 -ATTACH ATTACHX
+SVCE43   DC    X'80'         -T1 -CIRB
+SVCE44   DC    X'80'         -T2 -CHAP
+SVCE45   DC    X'80'         -T2 -OVLYBRCH
+SVCE46   DC    X'80'         -T2 -TTIMER STIMERM
+SVCE47   DC    X'80'         -T2 -STIMER STIMERM
+SVCE48   DC    X'80'         -T2 -DEQ
+SVCE49   DC    X'80'         -reserved
+SVCE50   DC    X'80'         -reserved
+SVCE51   DC    X'80'         -T4 -SNAP SNAPX SDUMP SDUMPX
+SVCE52   DC    X'80'         -T4 -RESTART
+SVCE53   DC    X'80'         -T3 -RELEX
+SVCE54   DC    X'80'         -T3 -DISABLE
+SVCE55   DC    X'80'         -T4 -EOV
+SVCE56   DC    X'80'        *-T2 -ENQ RESERVE
+SVCE57   DC    X'80'         -T3 -FREEDBUF
+SVCE58   DC    X'80'         -T1 -RELBUF REQBUF
+SVCE59   DC    X'80'         -T3 -OLTEP
+SVCE60   DC    X'80'         -T2 -STAE ESTAE ESTAEX
+SVCE61   DC    X'80'         -T3 -TSO/E
+SVCE62   DC    X'80'        *-T2 -DETACH
+SVCE63   DC    X'80'         -T3 -CHKPT
+SVCE64   DC    X'80'         -T3 -RDJFCB
+SVCE65   DC    X'80'         -reserved
+SVCE66   DC    X'80'         -T4 -BTAMTEST
+SVCE67   DC    X'80'         -reserved
+SVCE68   DC    X'80'         -T4 -SYNADAF SYNADRLS
+SVCE69   DC    X'80'         -T3 -BSP
+SVCE70   DC    X'80'         -reserved
+SVCE71   DC    X'80'         -T3 -ASGNBFR BUFINQ RLSEBFR
+SVCE72   DC    X'80'         -T4 -nomacro
+SVCE73   DC    X'80'         -T3 -SPAR
+SVCE74   DC    X'80'         -T3 -DAR
+SVCE75   DC    X'80'         -T3 -DQUEUE
+SVCE76   DC    X'80'         -T3 -nomacro
+SVCE77   DC    X'80'         -reserved
+SVCE78   DC    X'80'        *-T2 -LPACE
+SVCE79   DC    X'80'         -T2 -STATUS
+SVCE80   DC    X'80'         -reserved
+SVCE81   DC    X'80'         -T4 -SETPRT SETDEV
+SVCE82   DC    X'80'         -reserved
+SVCE83   DC    X'80'         -T3 -SMFWTM SMFEWTM  ***DONOT SCREEN***
+SVCE84   DC    X'80'         -T1 -GRAPHICS
+SVCE85   DC    X'80'         -T3 -nomacro
+SVCE86   DC    X'80'         -no longer supported
+SVCE87   DC    X'80'         -T3 -DOM
+SVCE88   DC    X'80'         -reserved
+SVCE89   DC    X'80'         -reserved
+SVCE90   DC    X'80'         -reserved
+SVCE91   DC    X'80'         -T3 -VOLSTAT
+SVCE92   DC    X'80'         -T1 -TCBEXCP
+SVCE93   DC    X'80'         -T3 -TGET TPUT TPG
+SVCE94   DC    X'80'         -T3 -STCC
+SVCE95   DC    X'80'         -T1 -SYSEVENT
+SVCE96   DC    X'80'         -T3 -STAX
+SVCE97   DC    X'80'         -T3 -TSO/E
+SVCE98   DC    X'80'         -T4 -PROTECT
+SVCE99   DC    X'80'         -T3 -DYNALLOC
+SVCE100  DC    X'80'         -T3 -TSO/E
+SVCE101  DC    X'80'         -T1 -QTIP
+SVCE102  DC    X'80'         -T3 -AQCTL
+SVCE103  DC    X'80'         -T3 -XLATE
+SVCE104  DC    X'80'         -T4 -TOPCTL
+SVCE105  DC    X'80'         -T3 -IMGLIB
+SVCE106  DC    X'80'         -reserved
+SVCE107  DC    X'80'        *-T6 -MODESET
+SVCE108  DC    X'80'         -reserved
+SVCE109  DC    X'80'         -T2 -ESR
+SVCE110  DC    X'80'         -reserved
+SVCE111  DC    X'80'         -T2 -nomacro
+SVCE112  DC    X'80'         -T1 -PGRLSE
+SVCE113  DC    X'80'         -T1 -PGFIX PGFREE PGLOAD PGOUT PGANY
+SVCE114  DC    X'80'         -T1 -EXCPVR
+SVCE115  DC    X'80'         -reserved
+SVCE116  DC    X'80'         -T6 -ESR
+SVCE117  DC    X'80'         -T2 -DEBCHK
+SVCE118  DC    X'80'         -reserved
+SVCE119  DC    X'80'         -T1 -TESTAUTH
+SVCE120  DC    X'80'        *-T1 -GETMAIN FREEMAIN
+SVCE121  DC    X'80'         -T1 -VSAM
+SVCE122  DC    X'80'         -T2 -ESR
+SVCE123  DC    X'80'         -T2 -PURGEDQ
+SVCE124  DC    X'80'         -T1 -TPIO
+SVCE125  DC    X'80'         -T1 -EVENTS
+SVCE126  DC    X'80'         -reserved
+SVCE127  DC    X'80'         -reserved
+SVCE128  DC    X'80'         -reserved
+SVCE129  DC    X'80'         -reserved
+SVCE130  DC    X'80'        *-T3 -RACHECK
+SVCE131  DC    X'80'        *-T3 -RACINIT
+SVCE132  DC    X'80'        *-T3 -RACLIST RACXTRT ICHEINTY
+SVCE133  DC    X'80'        *-T3 -RACDEF
+SVCE134  DC    X'80'         -reserved
+SVCE135  DC    X'80'         -reserved
+SVCE136  DC    X'80'         -reserved
+SVCE137  DC    X'80'         -T6 -ESR
+SVCE138  DC    X'80'         -T2 -PGSER
+SVCE139  DC    X'80'         -T3 -CVAF
+SVCE140  DC    X'80'         -reserved
+SVCE141  DC    X'80'         -reserved
+SVCE142  DC    X'80'         -reserved
+SVCE143  DC    X'80'         -T4 -GENKEY RETKEY CIPHER EMK
+SVCE144  DC    X'80'         -reserved
+SVCE145  DC    X'80'         -reserved
+SVCE146  DC    X'80'         -T3 -BPESVC
+SVCE147  DC    X'80'         -reserved
+SVCE148  DC    X'80'         -reserved
+SVCE149  DC    X'80'         -reserved
+SVCE150  DC    X'80'         -reserved
+SVCE151  DC    X'80'         -reserved
+SVCE152  DC    X'80'         -reserved
+SVCE153  DC    X'80'         -reserved
+SVCE154  DC    X'80'         -reserved
+SVCE155  DC    X'80'         -reserved
+SVCE156  DC    X'80'         -reserved
+SVCE157  DC    X'80'         -reserved
+SVCE158  DC    X'80'         -reserved
+SVCE159  DC    X'80'         -reserved
+SVCE160  DC    X'80'         -reserved
+SVCE161  DC    X'80'         -reserved
+SVCE162  DC    X'80'         -reserved
+SVCE163  DC    X'80'         -reserved
+SVCE164  DC    X'80'         -reserved
+SVCE165  DC    X'80'         -reserved
+SVCE166  DC    X'80'         -reserved
+SVCE167  DC    X'80'         -reserved
+SVCE168  DC    X'80'         -reserved
+SVCE169  DC    X'80'         -reserved
+SVCE170  DC    X'80'         -reserved
+SVCE171  DC    X'80'         -reserved
+SVCE172  DC    X'80'         -reserved
+SVCE173  DC    X'80'         -reserved
+SVCE174  DC    X'80'         -reserved
+SVCE175  DC    X'80'         -reserved
+SVCE176  DC    X'80'         -reserved
+SVCE177  DC    X'80'         -reserved
+SVCE178  DC    X'80'         -reserved
+SVCE179  DC    X'80'         -reserved
+SVCE180  DC    X'80'         -reserved
+SVCE181  DC    X'80'         -reserved
+SVCE182  DC    X'80'         -reserved
+SVCE183  DC    X'80'         -reserved
+SVCE184  DC    X'80'         -reserved
+SVCE185  DC    X'80'         -reserved
+SVCE186  DC    X'80'         -reserved
+SVCE187  DC    X'80'         -reserved
+SVCE188  DC    X'80'         -reserved
+SVCE189  DC    X'80'         -reserved
+SVCE190  DC    X'80'         -reserved
+SVCE191  DC    X'80'         -reserved
+SVCE192  DC    X'80'         -reserved
+SVCE193  DC    X'80'         -reserved
+SVCE194  DC    X'80'         -reserved
+SVCE195  DC    X'80'         -reserved
+SVCE196  DC    X'80'         -reserved
+SVCE197  DC    X'80'         -reserved
+SVCE198  DC    X'80'         -reserved
+SVCE199  DC    X'80'         -reserved
+SVCE200  DC    X'80'         -USERSVC
+SVCE201  DC    X'80'         -USERSVC
+SVCE202  DC    X'80'         -USERSVC
+SVCE203  DC    X'80'         -USERSVC
+SVCE204  DC    X'80'         -USERSVC
+SVCE205  DC    X'80'         -USERSVC
+SVCE206  DC    X'80'         -USERSVC
+SVCE207  DC    X'80'         -USERSVC
+SVCE208  DC    X'80'         -USERSVC
+SVCE209  DC    X'80'         -USERSVC
+SVCE210  DC    X'80'         -USERSVC
+SVCE211  DC    X'80'         -USERSVC
+SVCE212  DC    X'80'         -USERSVC
+SVCE213  DC    X'80'         -USERSVC
+SVCE214  DC    X'80'         -USERSVC
+SVCE215  DC    X'80'         -USERSVC
+SVCE216  DC    X'80'         -USERSVC
+SVCE217  DC    X'80'         -USERSVC
+SVCE218  DC    X'80'         -USERSVC
+SVCE219  DC    X'80'         -USERSVC
+SVCE220  DC    X'80'         -USERSVC
+SVCE221  DC    X'80'         -USERSVC
+SVCE222  DC    X'80'         -USERSVC
+SVCE223  DC    X'80'         -USERSVC
+SVCE224  DC    X'80'         -USERSVC
+SVCE225  DC    X'80'         -USERSVC
+SVCE226  DC    X'80'         -USERSVC
+SVCE227  DC    X'80'         -USERSVC
+SVCE228  DC    X'80'         -USERSVC
+SVCE229  DC    X'80'         -USERSVC
+SVCE230  DC    X'80'         -USERSVC
+SVCE231  DC    X'80'         -USERSVC
+SVCE232  DC    X'80'         -USERSVC
+SVCE233  DC    X'80'         -USERSVC
+SVCE234  DC    X'80'         -USERSVC
+SVCE235  DC    X'80'         -USERSVC
+SVCE236  DC    X'80'         -USERSVC
+SVCE237  DC    X'80'         -USERSVC
+SVCE238  DC    X'80'         -USERSVC
+SVCE239  DC    X'80'         -USERSVC
+SVCE240  DC    X'80'         -USERSVC
+SVCE241  DC    X'80'         -USERSVC
+SVCE242  DC    X'80'         -USERSVC
+SVCE243  DC    X'80'         -USERSVC
+SVCE244  DC    X'80'         -USERSVC
+SVCE245  DC    X'80'         -USERSVC
+SVCE246  DC    X'80'         -USERSVC
+SVCE247  DC    X'80'         -USERSVC
+SVCE248  DC    X'80'         -USERSVC
+SVCE249  DC    X'80'         -USERSVC
+SVCE250  DC    X'80'         -USERSVC
+SVCE251  DC    X'80'         -USERSVC
+SVCE252  DC    X'80'         -USERSVC
+SVCE253  DC    X'80'         -USERSVC
+SVCE254  DC    X'80'         -USERSVC
+SVCE255  DC    X'80'         -USERSVC
+SVCE@TBL EQU   *-SVCETABE    table size
+*
+**       SVCE Extension
+*
+SVCEXT   DS    0F
+SVCEID   DC    CL4'SVCE'     ID
+SVCEFLGS DS    0F
+SVCEFLG1 DC    XL1'00'      *WORK FLAGS
+SVCE@OPN EQU   X'80'         log opened
+SVCE@OFL EQU   X'40'         log open failed
+SVCE@CLS EQU   X'20'         log closed
+SVCE@1X3 EQU   X'10'         -available
+SVCE@1X4 EQU   X'08'         -available
+SVCE@1X5 EQU   X'04'         -available
+SVCE@1X6 EQU   X'02'         -available
+SVCE@1X7 EQU   X'01'         -available
+         DS    0C
+SVCEFLG2 DC    XL1'00'      *OPTIONS FLAGS
+SVCE@RPT EQU   X'80'         RPT={D|S} - (ON=D; OFF=S)
+SVCE@SMF EQU   X'40'         SMF={Y|N} - (ON=Y; OFF=N)
+SVCE@DIS EQU   X'20'         DIS={nnn}name} disallow indicator
+SVCE@RUN EQU   X'10'         RUN={S|J} - (ON=EOJ; OFF=EOT}
+SVCE@SPN EQU   X'08'         SPNTAB initialized
+SVCE@SMT EQU   X'04'         SMFTAB built indicator
+SVCE@LGX EQU   X'02'         LGXE initialized                      @02A
+SVCE@2X7 EQU   X'01'         -available
+         DS    0X
+SVCESVSF DC    XL1'00'      *SVCSVS SVXFLG1 debug flags
+SVCESVCF DC    XL1'00'      *SVCXIT XSAFLG1 debug flags
+         DS    0F
+SVCESVTA DC    A(0)          ZSVT address
+SVCESEQN DC    A(0)          Issued SVC sequence number
+SVCESTAB DC    A(0)          (testing only)
+SVCESTCB DC    A(0)          IEFIIC/IEFSD060 TCB address
+SVCEOTCB DC    A(0)          MONLOG OPEN owner TCB
+SVCEOASC DC    A(0)          MONLOG OPEN owner ASCB
+SVCESVXA DC    A(0)          (testing only)
+SVCESVRA DC    A(0)          (testing only)
+SVCESIZE DC    A(0)          SVCE table size
+SVCESVNA DC    A(0)          SVCNTAB storage address
+SVCESPNA DC    A(0)          SPNTAB storage address
+SVCESMFT DC    A(0)          SMFTAB table
+SVCELGXE DC    A(0)          LGXE address                          @02A
+SVCELOGC DC    A(0)          records logged                        @02A
+SVCEAVL2 DC    A(0)          -available
+         DS    0D
+SVCESTKN DC    XL8'0'        ASCBSTKN instance
+         DS    0C
+SVCELRPT DC    CL1'S'        RPT={D|S} option default
+SVCELRUN DC    CL1'S'        RUN={S|J} option default
+SVCELSMF DC    CL1'N'        SMF=(Y|N} option default
+SVCEJOBN DC    CL8'n/a'      jobname
+SVCELPAR DC    CL8'n/a'      LPAR - ECVTLPNM
+SVCEVMID DC    CL8'n/a'      VMID - ECVTVMNM
+SVCESYSN DC    CL8'n/a'      SID  - SVTSNAME
+SVCEJTYP DC    CL3'n/a'      job type {JOB|STC|TSU}
+SVCETERM DC    CL4'INIT'     INIT/TERM logging indicator
+SVCESUBN DC    CL4'&SUB'     subsystem name
+SVCEGDDN DC    CL8'AUDIT'    SUBSYS DD name default
+SVCELDDN DC    CL8'MONLOG'   MONLOG DDname default
+SVCELOGM DC    CL8'MONLOG'   MONLOG ENQ/DEQ minor name
+SVCESVCA DC    CL60' '       SVC=list
+SVCESPDA DC    CL60' '       SP=list
+         DC    CL8'SVCEENDS' SVCE ID
+         DS    0D
+SVCE@TBZ EQU   *-SVCETAB     SVCE size
+         MEXIT ,
+*/*******************************************************************/
+*/*                                                                 */
+*/* Name:         SVCNTAB                                           */
+*/*                                                                 */
+*/* Description:  SVC screening name table                          */
+*/*                                                                 */
+*/* Restrictions: All offsets fixed by architecture.                */
+*/*                                                                 */
+*/* SVNX entry:   XL1  - Screening indicator                        */
+*/*                      X'00' screening allowed                    */
+*/*                      X'80' screening not allowed                */
+*/*               XL1  - Fixed SVC attributes                       */
+*/*                      X'80' GETMAIN SVC                          */
+*/*                      X'40' FREEMAIN SVC                         */
+*/*                      X'C0' GETMAIN/FREEMAIN SVC                 */
+*/*                      X'08' -available                           */
+*/*                      X'04' -available                           */
+*/*                      X'02' -available                           */
+*/*                      X'01' -available                           */
+*/*               AL1  - SVC number                                 */
+*/*               AL3  - SVC issued count                           */
+*/*               CL26 - SVC macro name                             */
+*/*                                                                 */
+*/*******************************************************************/
+.GENSVN  ANOP  ,
+         AIF   ('&DSECT' EQ 'YES').YESECT
+         AGO   .NOSECT
+.YESECT  ANOP  ,
+SVCN     DSECT ,
+         AGO   .GOSVNE
+.NOSECT  ANOP  ,
+SVCN     DS    0D
+.GOSVNE  ANOP  ,
+SVCNTAB  DS    0D
+SVCN0   DC X'00',X'00',AL1(000),AL3(0),CL26'EXCP     XDAP'
+SVCN1   DC X'00',X'00',AL1(001),AL3(0),CL26'WAIT     WAITR    PRTOV'
+SVCN2   DC X'00',X'00',AL1(002),AL3(0),CL26'POST'
+SVCN3   DC X'80',X'00',AL1(003),AL3(0),CL26'EXIT'
+SVCN4   DC X'00',X'80',AL1(004),AL3(0),CL26'GETMAIN'
+SVCN5   DC X'00',X'40',AL1(005),AL3(0),CL26'FREEMAIN'
+SVCN6   DC X'00',X'00',AL1(006),AL3(0),CL26'LINK     LINKX'
+SVCN7   DC X'00',X'00',AL1(007),AL3(0),CL26'XCTL     XCTLX'
+SVCN8   DC X'00',X'00',AL1(008),AL3(0),CL26'LOAD'
+SVCN9   DC X'00',X'00',AL1(009),AL3(0),CL26'DELETE'
+SVCN10  DC X'00',X'C0',AL1(010),AL3(0),CL26'GETMAIN  FREEMAIN'
+SVCN11  DC X'00',X'00',AL1(011),AL3(0),CL26'TIME'
+SVCN12  DC X'00',X'00',AL1(012),AL3(0),CL26'SYNCH    SYNCHX'
+SVCN13  DC X'80',X'00',AL1(013),AL3(0),CL26'ABEND'
+SVCN14  DC X'80',X'00',AL1(014),AL3(0),CL26'SPIE'
+SVCN15  DC X'80',X'00',AL1(015),AL3(0),CL26'ERREXCP'
+SVCN16  DC X'80',X'00',AL1(016),AL3(0),CL26'PURGE'
+SVCN17  DC X'80',X'00',AL1(017),AL3(0),CL26'RESTORE'
+SVCN18  DC X'00',X'00',AL1(018),AL3(0),CL26'BLDL     FIND'
+SVCN19  DC X'00',X'00',AL1(019),AL3(0),CL26'OPEN'
+SVCN20  DC X'00',X'00',AL1(020),AL3(0),CL26'CLOSE'
+SVCN21  DC X'00',X'00',AL1(021),AL3(0),CL26'STOW'
+SVCN22  DC X'00',X'00',AL1(022),AL3(0),CL26'OPENJ    (TYPE=J)'
+SVCN23  DC X'00',X'00',AL1(023),AL3(0),CL26'CLOSET   (TYPE=T)'
+SVCN24  DC X'00',X'00',AL1(024),AL3(0),CL26'DEVTYPE'
+SVCN25  DC X'00',X'00',AL1(025),AL3(0),CL26'TRKBAL'
+SVCN26  DC X'80',X'00',AL1(026),AL3(0),CL26'CATALOG  INDEX    LOCATE'
+SVCN27  DC X'00',X'00',AL1(027),AL3(0),CL26'OBTAIN'
+SVCN28  DC X'80',X'00',AL1(028),AL3(0),CL26'Reserved'
+SVCN29  DC X'00',X'00',AL1(029),AL3(0),CL26'SCRATCH'
+SVCN30  DC X'00',X'00',AL1(030),AL3(0),CL26'RENAME'
+SVCN31  DC X'00',X'00',AL1(031),AL3(0),CL26'FEOV'
+SVCN32  DC X'00',X'00',AL1(032),AL3(0),CL26'REALLOC'
+SVCN33  DC X'80',X'00',AL1(033),AL3(0),CL26'IOHALT'
+SVCN34  DC X'00',X'00',AL1(034),AL3(0),CL26'MGCR     MGCRE    QEDIT'
+SVCN35  DC X'80',X'00',AL1(035),AL3(0),CL26'WTO      WTOR'
+SVCN36  DC X'80',X'00',AL1(036),AL3(0),CL26'WTL'
+SVCN37  DC X'80',X'00',AL1(037),AL3(0),CL26'SEGL     SEGWT'
+SVCN38  DC X'80',X'00',AL1(038),AL3(0),CL26'Reserved'
+SVCN39  DC X'80',X'00',AL1(039),AL3(0),CL26'LABEL'
+SVCN40  DC X'00',X'00',AL1(040),AL3(0),CL26'EXTRACT'
+SVCN41  DC X'00',X'00',AL1(041),AL3(0),CL26'IDENTIFY'
+SVCN42  DC X'00',X'00',AL1(042),AL3(0),CL26'ATTACH   ATTACHX'
+SVCN43  DC X'80',X'00',AL1(043),AL3(0),CL26'CIRB'
+SVCN44  DC X'80',X'00',AL1(044),AL3(0),CL26'CHAP'
+SVCN45  DC X'80',X'00',AL1(045),AL3(0),CL26'OVLYBRCH'
+SVCN46  DC X'00',X'00',AL1(046),AL3(0),CL26'TTIMER   STIMERM'
+SVCN47  DC X'00',X'00',AL1(047),AL3(0),CL26'STIMER   STIMERM'
+SVCN48  DC X'00',X'00',AL1(048),AL3(0),CL26'DEQ'
+SVCN49  DC X'80',X'00',AL1(049),AL3(0),CL26'Reserved'
+SVCN50  DC X'80',X'00',AL1(050),AL3(0),CL26'Reserved'
+SVCN51  DC X'80',X'00',AL1(051),AL3(0),CL26'SNAP     SDUMP    SDUMPX'
+SVCN52  DC X'80',X'00',AL1(052),AL3(0),CL26'RESTART'
+SVCN53  DC X'80',X'00',AL1(053),AL3(0),CL26'RELEX'
+SVCN54  DC X'80',X'00',AL1(054),AL3(0),CL26'DISABLE'
+SVCN55  DC X'80',X'00',AL1(055),AL3(0),CL26'EOV'
+SVCN56  DC X'00',X'00',AL1(056),AL3(0),CL26'ENQ      RESERVE'
+SVCN57  DC X'80',X'00',AL1(057),AL3(0),CL26'FREEDBUF'
+SVCN58  DC X'80',X'00',AL1(058),AL3(0),CL26'RELBUF   REQBUF'
+SVCN59  DC X'80',X'00',AL1(059),AL3(0),CL26'OLTEP'
+SVCN60  DC X'80',X'00',AL1(060),AL3(0),CL26'STAE     ESTAE    ESTAEX'
+SVCN61  DC X'80',X'00',AL1(061),AL3(0),CL26'TSO/E'
+SVCN62  DC X'00',X'00',AL1(062),AL3(0),CL26'DETACH'
+SVCN63  DC X'80',X'00',AL1(063),AL3(0),CL26'CHKPT'
+SVCN64  DC X'00',X'00',AL1(064),AL3(0),CL26'RDJFCB'
+SVCN65  DC X'80',X'00',AL1(065),AL3(0),CL26'Reserved'
+SVCN66  DC X'80',X'00',AL1(066),AL3(0),CL26'BTAMTEST'
+SVCN67  DC X'80',X'00',AL1(067),AL3(0),CL26'Reserved'
+SVCN68  DC X'80',X'00',AL1(068),AL3(0),CL26'SYNADAF  SYNADRLS'
+SVCN69  DC X'80',X'00',AL1(069),AL3(0),CL26'BSP'
+SVCN70  DC X'80',X'00',AL1(070),AL3(0),CL26'Reserved'
+SVCN71  DC X'80',X'00',AL1(071),AL3(0),CL26'ASGNBFR  BUFINQ  RLSEBFR'
+SVCN72  DC X'80',X'00',AL1(072),AL3(0),CL26'nomacro'
+SVCN73  DC X'80',X'00',AL1(073),AL3(0),CL26'SPAR'
+SVCN74  DC X'80',X'00',AL1(074),AL3(0),CL26'DAR'
+SVCN75  DC X'80',X'00',AL1(075),AL3(0),CL26'DQUEUE'
+SVCN76  DC X'80',X'00',AL1(076),AL3(0),CL26'nomacro'
+SVCN77  DC X'80',X'00',AL1(077),AL3(0),CL26'Reserved'
+SVCN78  DC X'00',X'00',AL1(078),AL3(0),CL26'LPACE'
+SVCN79  DC X'00',X'00',AL1(079),AL3(0),CL26'STATUS'
+SVCN80  DC X'80',X'00',AL1(080),AL3(0),CL26'Reserved'
+SVCN81  DC X'80',X'00',AL1(081),AL3(0),CL26'SETPRT   SETDEV'
+SVCN82  DC X'80',X'00',AL1(082),AL3(0),CL26'Reserved'
+SVCN83  DC X'00',X'00',AL1(083),AL3(0),CL26'SMFWTM   SMFEWTM'
+SVCN84  DC X'80',X'00',AL1(084),AL3(0),CL26'GRAPHICS'
+SVCN85  DC X'80',X'00',AL1(085),AL3(0),CL26'nomacro'
+SVCN86  DC X'80',X'00',AL1(086),AL3(0),CL26'Reserved'
+SVCN87  DC X'80',X'00',AL1(087),AL3(0),CL26'DOM'
+SVCN88  DC X'80',X'00',AL1(088),AL3(0),CL26'Reserved'
+SVCN89  DC X'80',X'00',AL1(089),AL3(0),CL26'Reserved'
+SVCN90  DC X'80',X'00',AL1(090),AL3(0),CL26'Reserved'
+SVCN91  DC X'80',X'00',AL1(091),AL3(0),CL26'VOLSTAT'
+SVCN92  DC X'80',X'00',AL1(092),AL3(0),CL26'TCBEXCP'
+SVCN93  DC X'00',X'00',AL1(093),AL3(0),CL26'TGET     TPUT    TPG'
+SVCN94  DC X'80',X'00',AL1(094),AL3(0),CL26'STCC'
+SVCN95  DC X'00',X'00',AL1(095),AL3(0),CL26'SYSEVENT'
+SVCN96  DC X'80',X'00',AL1(096),AL3(0),CL26'STAX'
+SVCN97  DC X'80',X'00',AL1(097),AL3(0),CL26'TSO/E'
+SVCN98  DC X'80',X'00',AL1(098),AL3(0),CL26'PROTECT'
+SVCN99  DC X'80',X'00',AL1(099),AL3(0),CL26'DYNALLOC'
+SVCN100 DC X'80',X'00',AL1(100),AL3(0),CL26'TSO/E'
+SVCN101 DC X'80',X'00',AL1(101),AL3(0),CL26'QTIP'
+SVCN102 DC X'80',X'00',AL1(102),AL3(0),CL26'AQCTL'
+SVCN103 DC X'80',X'00',AL1(103),AL3(0),CL26'XLATE'
+SVCN104 DC X'80',X'00',AL1(104),AL3(0),CL26'TOPCTL'
+SVCN105 DC X'80',X'00',AL1(105),AL3(0),CL26'IMGLIB'
+SVCN106 DC X'80',X'00',AL1(106),AL3(0),CL26'Reserved'
+SVCN107 DC X'00',X'00',AL1(107),AL3(0),CL26'MODESET'
+SVCN108 DC X'80',X'00',AL1(108),AL3(0),CL26'Reserved'
+SVCN109 DC X'80',X'00',AL1(109),AL3(0),CL26'ESR'      ***DONOT SCREEN*
+SVCN110 DC X'80',X'00',AL1(110),AL3(0),CL26'Reserved'
+SVCN111 DC X'80',X'00',AL1(111),AL3(0),CL26'JES2'  '
+SVCN112 DC X'80',X'00',AL1(112),AL3(0),CL26'PGRLSE'
+SVCN113 DC X'00',X'00',AL1(113),AL3(0),CL26'PGFIX    PGFRE   PGOUT'
+SVCN114 DC X'80',X'00',AL1(114),AL3(0),CL26'EXCPVR'
+SVCN115 DC X'80',X'00',AL1(115),AL3(0),CL26'Reserved'
+SVCN116 DC X'80',X'00',AL1(116),AL3(0),CL26'ESR'      ***DONOT SCREEN*
+SVCN117 DC X'80',X'00',AL1(117),AL3(0),CL26'DEBCHK'
+SVCN118 DC X'80',X'00',AL1(118),AL3(0),CL26'Reserved'
+SVCN119 DC X'80',X'00',AL1(119),AL3(0),CL26'TESTAUTH'
+SVCN120 DC X'00',X'C0',AL1(120),AL3(0),CL26'GETMAIN  FREEMAIN'
+SVCN121 DC X'80',X'00',AL1(121),AL3(0),CL26'VSAM'
+SVCN122 DC X'80',X'00',AL1(122),AL3(0),CL26'ESR'      ***DONOT SCREEN*
+SVCN123 DC X'80',X'00',AL1(123),AL3(0),CL26'PURGEDQ'
+SVCN124 DC X'80',X'00',AL1(124),AL3(0),CL26'TPIO'
+SVCN125 DC X'80',X'00',AL1(125),AL3(0),CL26'EVENTS'
+SVCN126 DC X'80',X'00',AL1(126),AL3(0),CL26'Reserved'
+SVCN127 DC X'80',X'00',AL1(127),AL3(0),CL26'Reserved'
+SVCN128 DC X'80',X'00',AL1(128),AL3(0),CL26'Reserved'
+SVCN129 DC X'80',X'00',AL1(129),AL3(0),CL26'Reserved'
+SVCN130 DC X'00',X'00',AL1(130),AL3(0),CL26'RACHECK'
+SVCN131 DC X'00',X'00',AL1(131),AL3(0),CL26'RACINIT'
+SVCN132 DC X'00',X'00',AL1(132),AL3(0),CL26'RACLIST  RACXTRT  ICHEINTY'
+SVCN133 DC X'80',X'00',AL1(133),AL3(0),CL26'RACDEF'
+SVCN134 DC X'80',X'00',AL1(134),AL3(0),CL26'Reserved'
+SVCN135 DC X'80',X'00',AL1(135),AL3(0),CL26'Reserved'
+SVCN136 DC X'80',X'00',AL1(136),AL3(0),CL26'Reserved'
+SVCN137 DC X'80',X'00',AL1(137),AL3(0),CL26'ESR'      ***DONOT SCREEN*
+SVCN138 DC X'00',X'00',AL1(138),AL3(0),CL26'PGSER'
+SVCN139 DC X'00',X'00',AL1(139),AL3(0),CL26'CVAF'
+SVCN140 DC X'80',X'00',AL1(140),AL3(0),CL26'Reserved'
+SVCN141 DC X'80',X'00',AL1(141),AL3(0),CL26'Reserved'
+SVCN142 DC X'80',X'00',AL1(142),AL3(0),CL26'Reserved'
+SVCN143 DC X'80',X'00',AL1(143),AL3(0),CL26'GENKEY   RETKEY   CIPHER'
+SVCN144 DC X'80',X'00',AL1(144),AL3(0),CL26'Reserved'
+SVCN145 DC X'80',X'00',AL1(145),AL3(0),CL26'Reserved'
+SVCN146 DC X'80',X'00',AL1(146),AL3(0),CL26'BPESVC'
+SVCN147 DC X'80',X'00',AL1(147),AL3(0),CL26'Reserved'
+SVCN148 DC X'80',X'00',AL1(148),AL3(0),CL26'Reserved'
+SVCN149 DC X'80',X'00',AL1(149),AL3(0),CL26'Reserved'
+SVCN150 DC X'80',X'00',AL1(150),AL3(0),CL26'Reserved'
+SVCN151 DC X'80',X'00',AL1(151),AL3(0),CL26'Reserved'
+SVCN152 DC X'80',X'00',AL1(152),AL3(0),CL26'Reserved'
+SVCN153 DC X'80',X'00',AL1(153),AL3(0),CL26'Reserved'
+SVCN154 DC X'80',X'00',AL1(154),AL3(0),CL26'Reserved'
+SVCN155 DC X'80',X'00',AL1(155),AL3(0),CL26'Reserved'
+SVCN156 DC X'80',X'00',AL1(156),AL3(0),CL26'Reserved'
+SVCN157 DC X'80',X'00',AL1(157),AL3(0),CL26'Reserved'
+SVCN158 DC X'80',X'00',AL1(158),AL3(0),CL26'Reserved'
+SVCN159 DC X'80',X'00',AL1(159),AL3(0),CL26'Reserved'
+SVCN160 DC X'80',X'00',AL1(160),AL3(0),CL26'Reserved'
+SVCN161 DC X'80',X'00',AL1(161),AL3(0),CL26'Reserved'
+SVCN162 DC X'80',X'00',AL1(162),AL3(0),CL26'Reserved'
+SVCN163 DC X'80',X'00',AL1(163),AL3(0),CL26'Reserved'
+SVCN164 DC X'80',X'00',AL1(164),AL3(0),CL26'Reserved'
+SVCN165 DC X'80',X'00',AL1(165),AL3(0),CL26'Reserved'
+SVCN166 DC X'80',X'00',AL1(166),AL3(0),CL26'Reserved'
+SVCN167 DC X'80',X'00',AL1(167),AL3(0),CL26'Reserved'
+SVCN168 DC X'80',X'00',AL1(168),AL3(0),CL26'Reserved'
+SVCN169 DC X'80',X'00',AL1(169),AL3(0),CL26'Reserved'
+SVCN170 DC X'80',X'00',AL1(170),AL3(0),CL26'Reserved'
+SVCN171 DC X'80',X'00',AL1(171),AL3(0),CL26'Reserved'
+SVCN172 DC X'80',X'00',AL1(172),AL3(0),CL26'Reserved'
+SVCN173 DC X'80',X'00',AL1(173),AL3(0),CL26'Reserved'
+SVCN174 DC X'80',X'00',AL1(174),AL3(0),CL26'Reserved'
+SVCN175 DC X'80',X'00',AL1(175),AL3(0),CL26'Reserved'
+SVCN176 DC X'80',X'00',AL1(176),AL3(0),CL26'Reserved'
+SVCN177 DC X'80',X'00',AL1(177),AL3(0),CL26'Reserved'
+SVCN178 DC X'80',X'00',AL1(178),AL3(0),CL26'Reserved'
+SVCN179 DC X'80',X'00',AL1(179),AL3(0),CL26'Reserved'
+SVCN180 DC X'80',X'00',AL1(180),AL3(0),CL26'Reserved'
+SVCN181 DC X'80',X'00',AL1(181),AL3(0),CL26'Reserved'
+SVCN182 DC X'80',X'00',AL1(182),AL3(0),CL26'Reserved'
+SVCN183 DC X'80',X'00',AL1(183),AL3(0),CL26'Reserved'
+SVCN184 DC X'80',X'00',AL1(184),AL3(0),CL26'Reserved'
+SVCN185 DC X'80',X'00',AL1(185),AL3(0),CL26'Reserved'
+SVCN186 DC X'80',X'00',AL1(186),AL3(0),CL26'Reserved'
+SVCN187 DC X'80',X'00',AL1(187),AL3(0),CL26'Reserved'
+SVCN188 DC X'80',X'00',AL1(188),AL3(0),CL26'Reserved'
+SVCN189 DC X'80',X'00',AL1(189),AL3(0),CL26'Reserved'
+SVCN190 DC X'80',X'00',AL1(190),AL3(0),CL26'Reserved'
+SVCN191 DC X'80',X'00',AL1(191),AL3(0),CL26'Reserved'
+SVCN192 DC X'80',X'00',AL1(192),AL3(0),CL26'Reserved'
+SVCN193 DC X'80',X'00',AL1(193),AL3(0),CL26'Reserved'
+SVCN194 DC X'80',X'00',AL1(194),AL3(0),CL26'Reserved'
+SVCN195 DC X'80',X'00',AL1(195),AL3(0),CL26'Reserved'
+SVCN196 DC X'80',X'00',AL1(196),AL3(0),CL26'Reserved'
+SVCN197 DC X'80',X'00',AL1(197),AL3(0),CL26'Reserved'
+SVCN198 DC X'80',X'00',AL1(198),AL3(0),CL26'Reserved'
+SVCN199 DC X'80',X'00',AL1(199),AL3(0),CL26'Reserved'
+SVCN200 DC X'00',X'00',AL1(200),AL3(0),CL26'USERSVC'
+SVCN201 DC X'00',X'00',AL1(201),AL3(0),CL26'USERSVC'
+SVCN202 DC X'00',X'00',AL1(202),AL3(0),CL26'USERSVC'
+SVCN203 DC X'00',X'00',AL1(203),AL3(0),CL26'USERSVC'
+SVCN204 DC X'00',X'00',AL1(204),AL3(0),CL26'USERSVC'
+SVCN205 DC X'00',X'00',AL1(205),AL3(0),CL26'USERSVC'
+SVCN206 DC X'00',X'00',AL1(206),AL3(0),CL26'USERSVC'
+SVCN207 DC X'00',X'00',AL1(207),AL3(0),CL26'USERSVC'
+SVCN208 DC X'00',X'00',AL1(208),AL3(0),CL26'USERSVC'
+SVCN209 DC X'00',X'00',AL1(209),AL3(0),CL26'USERSVC'
+SVCN210 DC X'00',X'00',AL1(210),AL3(0),CL26'USERSVC'
+SVCN211 DC X'00',X'00',AL1(211),AL3(0),CL26'USERSVC'
+SVCN212 DC X'00',X'00',AL1(212),AL3(0),CL26'USERSVC'
+SVCN213 DC X'00',X'00',AL1(213),AL3(0),CL26'USERSVC'
+SVCN214 DC X'00',X'00',AL1(214),AL3(0),CL26'USERSVC'
+SVCN215 DC X'00',X'00',AL1(215),AL3(0),CL26'USERSVC'
+SVCN216 DC X'00',X'00',AL1(216),AL3(0),CL26'USERSVC'
+SVCN217 DC X'00',X'00',AL1(217),AL3(0),CL26'USERSVC'
+SVCN218 DC X'00',X'00',AL1(218),AL3(0),CL26'USERSVC'
+SVCN219 DC X'00',X'00',AL1(219),AL3(0),CL26'USERSVC'
+SVCN220 DC X'00',X'00',AL1(220),AL3(0),CL26'USERSVC'
+SVCN221 DC X'00',X'00',AL1(221),AL3(0),CL26'USERSVC'
+SVCN222 DC X'00',X'00',AL1(222),AL3(0),CL26'USERSVC'
+SVCN223 DC X'00',X'00',AL1(223),AL3(0),CL26'USERSVC'
+SVCN224 DC X'00',X'00',AL1(224),AL3(0),CL26'USERSVC'
+SVCN225 DC X'00',X'00',AL1(225),AL3(0),CL26'USERSVC'
+SVCN226 DC X'00',X'00',AL1(226),AL3(0),CL26'USERSVC'
+SVCN227 DC X'00',X'00',AL1(227),AL3(0),CL26'USERSVC'
+SVCN228 DC X'00',X'00',AL1(228),AL3(0),CL26'USERSVC'
+SVCN229 DC X'00',X'00',AL1(229),AL3(0),CL26'USERSVC'
+SVCN230 DC X'00',X'00',AL1(230),AL3(0),CL26'USERSVC'
+SVCN231 DC X'00',X'00',AL1(231),AL3(0),CL26'USERSVC'
+SVCN232 DC X'00',X'00',AL1(232),AL3(0),CL26'USERSVC'
+SVCN233 DC X'00',X'00',AL1(233),AL3(0),CL26'USERSVC'
+SVCN234 DC X'00',X'00',AL1(234),AL3(0),CL26'USERSVC'
+SVCN235 DC X'00',X'00',AL1(235),AL3(0),CL26'USERSVC'
+SVCN236 DC X'00',X'00',AL1(236),AL3(0),CL26'USERSVC'
+SVCN237 DC X'00',X'00',AL1(237),AL3(0),CL26'USERSVC'
+SVCN238 DC X'00',X'00',AL1(238),AL3(0),CL26'USERSVC'
+SVCN239 DC X'00',X'00',AL1(239),AL3(0),CL26'USERSVC'
+SVCN240 DC X'00',X'00',AL1(240),AL3(0),CL26'USERSVC'
+SVCN241 DC X'00',X'00',AL1(241),AL3(0),CL26'USERSVC'
+SVCN242 DC X'00',X'00',AL1(242),AL3(0),CL26'USERSVC'
+SVCN243 DC X'00',X'00',AL1(243),AL3(0),CL26'USERSVC'
+SVCN244 DC X'00',X'00',AL1(244),AL3(0),CL26'USERSVC'
+SVCN245 DC X'00',X'00',AL1(245),AL3(0),CL26'USERSVC'
+SVCN246 DC X'00',X'00',AL1(246),AL3(0),CL26'USERSVC'
+SVCN247 DC X'00',X'00',AL1(247),AL3(0),CL26'USERSVC'
+SVCN248 DC X'00',X'00',AL1(248),AL3(0),CL26'USERSVC'
+SVCN249 DC X'00',X'00',AL1(249),AL3(0),CL26'USERSVC'
+SVCN250 DC X'00',X'00',AL1(250),AL3(0),CL26'USERSVC'
+SVCN251 DC X'00',X'00',AL1(251),AL3(0),CL26'USERSVC'
+SVCN252 DC X'00',X'00',AL1(252),AL3(0),CL26'USERSVC'
+SVCN253 DC X'00',X'00',AL1(253),AL3(0),CL26'USERSVC'
+SVCN254 DC X'00',X'00',AL1(254),AL3(0),CL26'USERSVC'
+SVCN255 DC X'00',X'00',AL1(255),AL3(0),CL26'USERSVC'
+         DS    0D
+SVCN@TBL EQU   *-SVCN
+SVCN@TBE EQU   SVCN@TBL/32
+         MEXIT ,
+*/*******************************************************************/
+*/*                                                                 */
+*/* Name:         SPNTAB                                            */
+*/*                                                                 */
+*/* Description:  Subpool attributes table                          */
+*/*                                                                 */
+*/* Restrictions: All offsets fixed by architecture.                */
+*/*                                                                 */
+*/* SPN entry:    XL1 Subpool attributes                            */
+*/*                    X'80' SQA  = common subpool                  */
+*/*                    X'40' CSA  = common subpool                  */
+*/*                    X'20' LSQA = local system queue area subpool */
+*/*                    X'10' PVT  = private subpool                 */
+*/*                    X'08' JST  = jobstep subpool                 */
+*/*               AL1 Subpool number                                */
+*/*               XL1  X'80' Log SVC audit record                   */
+*/*                    X'00' DONOT SVC log audit record             */
+*/*               XL1 reserved                                      */
+*/*                                                                 */
+*/*******************************************************************/
+.GENSPN  ANOP  ,
+         AIF   ('&DSECT' EQ 'YES').YESSPN
+         AGO   .NOSPN
+.YESSPN  ANOP  ,
+SPN      DSECT ,
+         AGO   .GOSPN
+.NOSPN   ANOP  ,
+SPN      DS    0F
+.GOSPN   ANOP  ,
+SPNTAB   DS    0F
+SPN0     DC    XL1'10',AL1(000),XL1'00',XL1'00'  private
+SPN1     DC    XL1'10',AL1(001),XL1'00',XL1'00'  private
+SPN2     DC    XL1'10',AL1(002),XL1'00',XL1'00'  private
+SPN3     DC    XL1'10',AL1(003),XL1'00',XL1'00'  private
+SPN4     DC    XL1'10',AL1(004),XL1'00',XL1'00'  private
+SPN5     DC    XL1'10',AL1(005),XL1'00',XL1'00'  private
+SPN6     DC    XL1'10',AL1(006),XL1'00',XL1'00'  private
+SPN7     DC    XL1'10',AL1(007),XL1'00',XL1'00'  private
+SPN8     DC    XL1'10',AL1(008),XL1'00',XL1'00'  private
+SPN9     DC    XL1'10',AL1(009),XL1'00',XL1'00'  private
+SPN10    DC    XL1'10',AL1(010),XL1'00',XL1'00'  private
+SPN11    DC    XL1'10',AL1(011),XL1'00',XL1'00'  private
+SPN12    DC    XL1'10',AL1(012),XL1'00',XL1'00'  private
+SPN13    DC    XL1'10',AL1(013),XL1'00',XL1'00'  private
+SPN14    DC    XL1'10',AL1(014),XL1'00',XL1'00'  private
+SPN15    DC    XL1'10',AL1(015),XL1'00',XL1'00'  private
+SPN16    DC    XL1'10',AL1(016),XL1'00',XL1'00'  private
+SPN17    DC    XL1'10',AL1(017),XL1'00',XL1'00'  private
+SPN18    DC    XL1'10',AL1(018),XL1'00',XL1'00'  private
+SPN19    DC    XL1'10',AL1(019),XL1'00',XL1'00'  private
+SPN20    DC    XL1'10',AL1(020),XL1'00',XL1'00'  private
+SPN21    DC    XL1'10',AL1(021),XL1'00',XL1'00'  private
+SPN22    DC    XL1'10',AL1(022),XL1'00',XL1'00'  private
+SPN23    DC    XL1'10',AL1(023),XL1'00',XL1'00'  private
+SPN24    DC    XL1'10',AL1(024),XL1'00',XL1'00'  private
+SPN25    DC    XL1'10',AL1(025),XL1'00',XL1'00'  private
+SPN26    DC    XL1'10',AL1(026),XL1'00',XL1'00'  private
+SPN27    DC    XL1'10',AL1(027),XL1'00',XL1'00'  private
+SPN28    DC    XL1'10',AL1(028),XL1'00',XL1'00'  private
+SPN29    DC    XL1'10',AL1(029),XL1'00',XL1'00'  private
+SPN30    DC    XL1'10',AL1(030),XL1'00',XL1'00'  private
+SPN31    DC    XL1'10',AL1(031),XL1'00',XL1'00'  private
+SPN32    DC    XL1'10',AL1(032),XL1'00',XL1'00'  private
+SPN33    DC    XL1'10',AL1(033),XL1'00',XL1'00'  private
+SPN34    DC    XL1'10',AL1(034),XL1'00',XL1'00'  private
+SPN35    DC    XL1'10',AL1(035),XL1'00',XL1'00'  private
+SPN36    DC    XL1'10',AL1(036),XL1'00',XL1'00'  private
+SPN37    DC    XL1'10',AL1(037),XL1'00',XL1'00'  private
+SPN38    DC    XL1'10',AL1(038),XL1'00',XL1'00'  private
+SPN39    DC    XL1'10',AL1(039),XL1'00',XL1'00'  private
+SPN40    DC    XL1'10',AL1(040),XL1'00',XL1'00'  private
+SPN41    DC    XL1'10',AL1(041),XL1'00',XL1'00'  private
+SPN42    DC    XL1'10',AL1(042),XL1'00',XL1'00'  private
+SPN43    DC    XL1'10',AL1(043),XL1'00',XL1'00'  private
+SPN44    DC    XL1'10',AL1(044),XL1'00',XL1'00'  private
+SPN45    DC    XL1'10',AL1(045),XL1'00',XL1'00'  private
+SPN46    DC    XL1'10',AL1(046),XL1'00',XL1'00'  private
+SPN47    DC    XL1'10',AL1(047),XL1'00',XL1'00'  private
+SPN48    DC    XL1'10',AL1(048),XL1'00',XL1'00'  private
+SPN49    DC    XL1'10',AL1(049),XL1'00',XL1'00'  private
+SPN50    DC    XL1'10',AL1(050),XL1'00',XL1'00'  private
+SPN51    DC    XL1'10',AL1(051),XL1'00',XL1'00'  private
+SPN52    DC    XL1'10',AL1(052),XL1'00',XL1'00'  private
+SPN53    DC    XL1'10',AL1(053),XL1'00',XL1'00'  private
+SPN54    DC    XL1'10',AL1(054),XL1'00',XL1'00'  private
+SPN55    DC    XL1'10',AL1(055),XL1'00',XL1'00'  private
+SPN56    DC    XL1'10',AL1(056),XL1'00',XL1'00'  private
+SPN57    DC    XL1'10',AL1(057),XL1'00',XL1'00'  private
+SPN58    DC    XL1'10',AL1(058),XL1'00',XL1'00'  private
+SPN59    DC    XL1'10',AL1(059),XL1'00',XL1'00'  private
+SPN60    DC    XL1'10',AL1(060),XL1'00',XL1'00'  private
+SPN61    DC    XL1'10',AL1(061),XL1'00',XL1'00'  private
+SPN62    DC    XL1'10',AL1(062),XL1'00',XL1'00'  private
+SPN63    DC    XL1'10',AL1(063),XL1'00',XL1'00'  private
+SPN64    DC    XL1'10',AL1(064),XL1'00',XL1'00'  private
+SPN65    DC    XL1'10',AL1(065),XL1'00',XL1'00'  private
+SPN66    DC    XL1'10',AL1(066),XL1'00',XL1'00'  private
+SPN67    DC    XL1'10',AL1(067),XL1'00',XL1'00'  private
+SPN68    DC    XL1'10',AL1(068),XL1'00',XL1'00'  private
+SPN69    DC    XL1'10',AL1(069),XL1'00',XL1'00'  private
+SPN70    DC    XL1'10',AL1(070),XL1'00',XL1'00'  private
+SPN71    DC    XL1'10',AL1(071),XL1'00',XL1'00'  private
+SPN72    DC    XL1'10',AL1(072),XL1'00',XL1'00'  private
+SPN73    DC    XL1'10',AL1(073),XL1'00',XL1'00'  private
+SPN74    DC    XL1'10',AL1(074),XL1'00',XL1'00'  private
+SPN75    DC    XL1'10',AL1(075),XL1'00',XL1'00'  private
+SPN76    DC    XL1'10',AL1(076),XL1'00',XL1'00'  private
+SPN77    DC    XL1'10',AL1(077),XL1'00',XL1'00'  private
+SPN78    DC    XL1'10',AL1(078),XL1'00',XL1'00'  private
+SPN79    DC    XL1'10',AL1(079),XL1'00',XL1'00'  private
+SPN80    DC    XL1'10',AL1(080),XL1'00',XL1'00'  private
+SPN81    DC    XL1'10',AL1(081),XL1'00',XL1'00'  private
+SPN82    DC    XL1'10',AL1(082),XL1'00',XL1'00'  private
+SPN83    DC    XL1'10',AL1(083),XL1'00',XL1'00'  private
+SPN84    DC    XL1'10',AL1(084),XL1'00',XL1'00'  private
+SPN85    DC    XL1'10',AL1(085),XL1'00',XL1'00'  private
+SPN86    DC    XL1'10',AL1(086),XL1'00',XL1'00'  private
+SPN87    DC    XL1'10',AL1(087),XL1'00',XL1'00'  private
+SPN88    DC    XL1'10',AL1(088),XL1'00',XL1'00'  private
+SPN89    DC    XL1'10',AL1(089),XL1'00',XL1'00'  private
+SPN90    DC    XL1'10',AL1(090),XL1'00',XL1'00'  private
+SPN91    DC    XL1'10',AL1(091),XL1'00',XL1'00'  private
+SPN92    DC    XL1'10',AL1(092),XL1'00',XL1'00'  private
+SPN93    DC    XL1'10',AL1(093),XL1'00',XL1'00'  private
+SPN94    DC    XL1'10',AL1(094),XL1'00',XL1'00'  private
+SPN95    DC    XL1'10',AL1(095),XL1'00',XL1'00'  private
+SPN96    DC    XL1'10',AL1(096),XL1'00',XL1'00'  private
+SPN97    DC    XL1'10',AL1(097),XL1'00',XL1'00'  private
+SPN98    DC    XL1'10',AL1(098),XL1'00',XL1'00'  private
+SPN99    DC    XL1'10',AL1(099),XL1'00',XL1'00'  private
+SPN100   DC    XL1'10',AL1(100),XL1'00',XL1'00'  private
+SPN101   DC    XL1'10',AL1(101),XL1'00',XL1'00'  private
+SPN102   DC    XL1'10',AL1(102),XL1'00',XL1'00'  private
+SPN103   DC    XL1'10',AL1(103),XL1'00',XL1'00'  private
+SPN104   DC    XL1'10',AL1(104),XL1'00',XL1'00'  private
+SPN105   DC    XL1'10',AL1(105),XL1'00',XL1'00'  private
+SPN106   DC    XL1'10',AL1(106),XL1'00',XL1'00'  private
+SPN107   DC    XL1'10',AL1(107),XL1'00',XL1'00'  private
+SPN108   DC    XL1'10',AL1(108),XL1'00',XL1'00'  private
+SPN109   DC    XL1'10',AL1(109),XL1'00',XL1'00'  private
+SPN110   DC    XL1'10',AL1(110),XL1'00',XL1'00'  private
+SPN111   DC    XL1'10',AL1(111),XL1'00',XL1'00'  private
+SPN112   DC    XL1'10',AL1(112),XL1'00',XL1'00'  private
+SPN113   DC    XL1'10',AL1(113),XL1'00',XL1'00'  private
+SPN114   DC    XL1'10',AL1(114),XL1'00',XL1'00'  private
+SPN115   DC    XL1'10',AL1(115),XL1'00',XL1'00'  private
+SPN116   DC    XL1'10',AL1(116),XL1'00',XL1'00'  private
+SPN117   DC    XL1'10',AL1(117),XL1'00',XL1'00'  private
+SPN118   DC    XL1'10',AL1(118),XL1'00',XL1'00'  private
+SPN119   DC    XL1'10',AL1(119),XL1'00',XL1'00'  private
+SPN120   DC    XL1'10',AL1(120),XL1'00',XL1'00'  private
+SPN121   DC    XL1'10',AL1(121),XL1'00',XL1'00'  private
+SPN122   DC    XL1'10',AL1(122),XL1'00',XL1'00'  private
+SPN123   DC    XL1'10',AL1(123),XL1'00',XL1'00'  private
+SPN124   DC    XL1'10',AL1(124),XL1'00',XL1'00'  private
+SPN125   DC    XL1'10',AL1(125),XL1'00',XL1'00'  private
+SPN126   DC    XL1'10',AL1(126),XL1'00',XL1'00'  private
+SPN127   DC    XL1'10',AL1(127),XL1'00',XL1'00'  private
+*
+SPN128   DC    XL1'00',AL1(128),XL1'00',XL1'00'  -reserved
+*
+SPN129   DC    XL1'08',AL1(129),XL1'00',XL1'00'  TCBJSTCB
+SPN130   DC    XL1'08',AL1(130),XL1'00',XL1'00'  TCBJSTCB
+SPN131   DC    XL1'08',AL1(131),XL1'00',XL1'00'  TCBJSTCB
+SPN132   DC    XL1'08',AL1(132),XL1'00',XL1'00'  TCBJSTCB
+*
+SPN133   DC    XL1'10',AL1(133),XL1'00',XL1'00'  private
+SPN134   DC    XL1'10',AL1(134),XL1'00',XL1'00'  private
+*
+SPN135   DC    XL1'00',AL1(135),XL1'00',XL1'00'  -reserved
+SPN136   DC    XL1'00',AL1(136),XL1'00',XL1'00'  -reserved
+SPN137   DC    XL1'00',AL1(137),XL1'00',XL1'00'  -reserved
+SPN138   DC    XL1'00',AL1(138),XL1'00',XL1'00'  -reserved
+SPN139   DC    XL1'00',AL1(139),XL1'00',XL1'00'  -reserved
+SPN140   DC    XL1'00',AL1(140),XL1'00',XL1'00'  -reserved
+SPN141   DC    XL1'00',AL1(141),XL1'00',XL1'00'  -reserved
+SPN142   DC    XL1'00',AL1(142),XL1'00',XL1'00'  -reserved
+SPN143   DC    XL1'00',AL1(143),XL1'00',XL1'00'  -reserved
+SPN144   DC    XL1'00',AL1(144),XL1'00',XL1'00'  -reserved
+SPN145   DC    XL1'00',AL1(145),XL1'00',XL1'00'  -reserved
+SPN146   DC    XL1'00',AL1(146),XL1'00',XL1'00'  -reserved
+SPN147   DC    XL1'00',AL1(147),XL1'00',XL1'00'  -reserved
+SPN148   DC    XL1'00',AL1(148),XL1'00',XL1'00'  -reserved
+SPN149   DC    XL1'00',AL1(149),XL1'00',XL1'00'  -reserved
+SPN150   DC    XL1'00',AL1(150),XL1'00',XL1'00'  -reserved
+SPN151   DC    XL1'00',AL1(151),XL1'00',XL1'00'  -reserved
+SPN152   DC    XL1'00',AL1(152),XL1'00',XL1'00'  -reserved
+SPN153   DC    XL1'00',AL1(153),XL1'00',XL1'00'  -reserved
+SPN154   DC    XL1'00',AL1(154),XL1'00',XL1'00'  -reserved
+SPN155   DC    XL1'00',AL1(155),XL1'00',XL1'00'  -reserved
+SPN156   DC    XL1'00',AL1(156),XL1'00',XL1'00'  -reserved
+SPN157   DC    XL1'00',AL1(157),XL1'00',XL1'00'  -reserved
+SPN158   DC    XL1'00',AL1(158),XL1'00',XL1'00'  -reserved
+SPN159   DC    XL1'00',AL1(159),XL1'00',XL1'00'  -reserved
+SPN160   DC    XL1'00',AL1(160),XL1'00',XL1'00'  -reserved
+SPN161   DC    XL1'00',AL1(161),XL1'00',XL1'00'  -reserved
+SPN162   DC    XL1'00',AL1(162),XL1'00',XL1'00'  -reserved
+SPN163   DC    XL1'00',AL1(163),XL1'00',XL1'00'  -reserved
+SPN164   DC    XL1'00',AL1(164),XL1'00',XL1'00'  -reserved
+SPN165   DC    XL1'00',AL1(165),XL1'00',XL1'00'  -reserved
+SPN166   DC    XL1'00',AL1(166),XL1'00',XL1'00'  -reserved
+SPN167   DC    XL1'00',AL1(167),XL1'00',XL1'00'  -reserved
+SPN168   DC    XL1'00',AL1(168),XL1'00',XL1'00'  -reserved
+SPN169   DC    XL1'00',AL1(169),XL1'00',XL1'00'  -reserved
+SPN170   DC    XL1'00',AL1(170),XL1'00',XL1'00'  -reserved
+SPN171   DC    XL1'00',AL1(171),XL1'00',XL1'00'  -reserved
+SPN172   DC    XL1'00',AL1(172),XL1'00',XL1'00'  -reserved
+SPN173   DC    XL1'00',AL1(173),XL1'00',XL1'00'  -reserved
+SPN174   DC    XL1'00',AL1(174),XL1'00',XL1'00'  -reserved
+SPN175   DC    XL1'00',AL1(175),XL1'00',XL1'00'  -reserved
+SPN176   DC    XL1'00',AL1(176),XL1'00',XL1'00'  -reserved
+SPN177   DC    XL1'00',AL1(177),XL1'00',XL1'00'  -reserved
+SPN178   DC    XL1'00',AL1(178),XL1'00',XL1'00'  -reserved
+SPN179   DC    XL1'00',AL1(179),XL1'00',XL1'00'  -reserved
+SPN180   DC    XL1'00',AL1(180),XL1'00',XL1'00'  -reserved
+SPN181   DC    XL1'00',AL1(181),XL1'00',XL1'00'  -reserved
+SPN182   DC    XL1'00',AL1(182),XL1'00',XL1'00'  -reserved
+SPN183   DC    XL1'00',AL1(183),XL1'00',XL1'00'  -reserved
+SPN184   DC    XL1'00',AL1(184),XL1'00',XL1'00'  -reserved
+SPN185   DC    XL1'00',AL1(185),XL1'00',XL1'00'  -reserved
+SPN186   DC    XL1'00',AL1(186),XL1'00',XL1'00'  -reserved
+SPN187   DC    XL1'00',AL1(187),XL1'00',XL1'00'  -reserved
+SPN188   DC    XL1'00',AL1(188),XL1'00',XL1'00'  -reserved
+SPN189   DC    XL1'00',AL1(189),XL1'00',XL1'00'  -reserved
+SPN190   DC    XL1'00',AL1(190),XL1'00',XL1'00'  -reserved
+SPN191   DC    XL1'00',AL1(191),XL1'00',XL1'00'  -reserved
+SPN192   DC    XL1'00',AL1(192),XL1'00',XL1'00'  -reserved
+SPN193   DC    XL1'00',AL1(193),XL1'00',XL1'00'  -reserved
+SPN194   DC    XL1'00',AL1(194),XL1'00',XL1'00'  -reserved
+SPN195   DC    XL1'00',AL1(195),XL1'00',XL1'00'  -reserved
+SPN196   DC    XL1'00',AL1(196),XL1'00',XL1'00'  -reserved
+SPN197   DC    XL1'00',AL1(197),XL1'00',XL1'00'  -reserved
+SPN198   DC    XL1'00',AL1(198),XL1'00',XL1'00'  -reserved
+SPN199   DC    XL1'00',AL1(199),XL1'00',XL1'00'  -reserved
+SPN200   DC    XL1'00',AL1(120),XL1'00',XL1'00'  -reserved
+SPN201   DC    XL1'00',AL1(201),XL1'00',XL1'00'  -reserved
+SPN202   DC    XL1'00',AL1(202),XL1'00',XL1'00'  -reserved
+*
+SPN203   DC    XL1'20',AL1(203),XL1'00',XL1'00'  LSQA
+SPN204   DC    XL1'20',AL1(204),XL1'00',XL1'00'  LSQA
+SPN205   DC    XL1'20',AL1(205),XL1'00',XL1'00'  LSQA
+*
+SPN206   DC    XL1'00',AL1(206),XL1'00',XL1'00'  -reserved
+SPN207   DC    XL1'00',AL1(207),XL1'00',XL1'00'  -reserved
+SPN208   DC    XL1'00',AL1(208),XL1'00',XL1'00'  -reserved
+SPN209   DC    XL1'00',AL1(209),XL1'00',XL1'00'  -reserved
+SPN210   DC    XL1'00',AL1(210),XL1'00',XL1'00'  -reserved
+SPN211   DC    XL1'00',AL1(211),XL1'00',XL1'00'  -reserved
+SPN212   DC    XL1'00',AL1(212),XL1'00',XL1'00'  -reserved
+*
+SPN213   DC    XL1'20',AL1(213),XL1'00',XL1'00'  LSQA
+SPN214   DC    XL1'20',AL1(214),XL1'00',XL1'00'  LSQA
+SPN215   DC    XL1'20',AL1(215),XL1'00',XL1'00'  LSQA
+*
+SPN216   DC    XL1'00',AL1(216),XL1'00',XL1'00'  -reserved
+SPN217   DC    XL1'00',AL1(217),XL1'00',XL1'00'  -reserved
+SPN218   DC    XL1'00',AL1(218),XL1'00',XL1'00'  -reserved
+SPN219   DC    XL1'00',AL1(219),XL1'00',XL1'00'  -reserved
+SPN220   DC    XL1'00',AL1(220),XL1'00',XL1'00'  -reserved
+SPN221   DC    XL1'00',AL1(221),XL1'00',XL1'00'  -reserved
+SPN222   DC    XL1'00',AL1(222),XL1'00',XL1'00'  -reserved
+*
+SPN223   DC    XL1'20',AL1(223),XL1'00',XL1'00'  LSQA
+SPN224   DC    XL1'20',AL1(224),XL1'00',XL1'00'  LSQA
+SPN225   DC    XL1'20',AL1(225),XL1'00',XL1'00'  LSQA
+*
+SPN226   DC    XL1'80',AL1(226),XL1'00',XL1'00'  SQA/ESQA
+*
+SPN227   DC    XL1'40',AL1(227),XL1'00',XL1'00'  CSA/ECSA
+SPN228   DC    XL1'40',AL1(228),XL1'00',XL1'00'  CSA/ECSA
+*
+SPN229   DC    XL1'10',AL1(229),XL1'00',XL1'00'  private
+SPN230   DC    XL1'10',AL1(230),XL1'00',XL1'00'  private
+*
+SPN231   DC    XL1'40',AL1(231),XL1'00',XL1'00'  CSA/ECSA
+*
+SPN232   DC    XL1'00',AL1(232),XL1'00',XL1'00'  -reserved
+*
+SPN233   DC    XL1'20',AL1(233),XL1'00',XL1'00'  LSQA
+SPN234   DC    XL1'20',AL1(234),XL1'00',XL1'00'  LSQA
+SPN235   DC    XL1'20',AL1(235),XL1'00',XL1'00'  LSQA
+*
+SPN236   DC    XL1'10',AL1(236),XL1'00',XL1'00'  private
+SPN237   DC    XL1'10',AL1(237),XL1'00',XL1'00'  private
+*
+SPN238   DC    XL1'00',AL1(238),XL1'00',XL1'00'  -reserved
+*
+SPN239   DC    XL1'40',AL1(239),XL1'00',XL1'00'  CSA/ECSA
+*
+SPN240   DC    XL1'10',AL1(240),XL1'00',XL1'00'  private
+*
+SPN241   DC    XL1'40',AL1(241),XL1'00',XL1'00'  CSA/ECSA
+*
+SPN242   DC    XL1'00',AL1(242),XL1'00',XL1'00'  -reserved
+SPN243   DC    XL1'00',AL1(243),XL1'00',XL1'00'  -reserved
+*
+SPN244   DC    XL1'08',AL1(244),XL1'00',XL1'00'  TCBJSTCB
+*
+SPN245   DC    XL1'80',AL1(245),XL1'00',XL1'00'  SQA/ESQA
+*
+SPN246   DC    XL1'00',AL1(246),XL1'00',XL1'00'  -reserved
+*
+SPN247   DC    XL1'80',AL1(247),XL1'00',XL1'00'  SQA/ESQA
+SPN248   DC    XL1'80',AL1(248),XL1'00',XL1'00'  SQA/ESQA
+*
+SPN249   DC    XL1'08',AL1(249),XL1'00',XL1'00'  TCBJSTCB
+SPN250   DC    XL1'10',AL1(250),XL1'00',XL1'00'  private
+SPN251   DC    XL1'08',AL1(251),XL1'00',XL1'00'  TJBJSTCB
+SPN252   DC    XL1'08',AL1(252),XL1'00',XL1'00'  TCBJSTCB
+*
+SPN253   DC    XL1'20',AL1(253),XL1'00',XL1'00'  LSQA
+SPN254   DC    XL1'20',AL1(254),XL1'00',XL1'00'  LSQA
+SPN255   DC    XL1'20',AL1(255),XL1'00',XL1'00'  LSQA
+         DS    0D
+SPN@TABL EQU   *-SPN
+SPN@TABE EQU   SPN@TABL/4
+         MEXIT ,
+*/*******************************************************************/
+*/*                                                                 */
+*/* Name:         GENMAC                                            */
+*/*                                                                 */
+*/* Description:  Generate SVC screening maps                       */
+*/*                                                                 */
+*/* Restrictions: All offsets fixed by architecture.                */
+*/*                                                                 */
+*/*******************************************************************/
+.GENMAC  ANOP  ,
+*
+**       Virtual storage structure table map
+*
+STAB     DSECT ,
+STABID   DS    CL4'STAB'        ID
+STABFLG1 DS    XL1              flags
+STAB@INI EQU   X'80'            initialization complete
+STAB@1V1 EQU   X'40'            -available
+STAB@1V2 EQU   X'20'            -available
+STAB@1V3 EQU   X'10'            -available
+STAB@1V4 EQU   X'08'            -available
+STAB@1V5 EQU   X'04'            -available
+STAB@1V6 EQU   X'02'            -available
+STAB@1V7 EQU   X'01'            -available
+STABFLGX DS    XL3              more flags
+         DS    0A
+STABSVCE DS    A                SVCETAB address
+STABSVCN DS    A                SVCNTAB address
+STABSPN  DS    A                SPNTAB address
+STABSMF  DS    A                SMFTAB address
+STABRSV0 DS    A                -available
+STABRSV1 DS    A                -available
+STABITKN DS    A                instance token
+STABUCNT DS    A                use count
+STABSIZE DS    A                table size
+STABDATA DS    0D               storage block
+STAB@SZE EQU   *-STAB           table size
+*
+**       SVC macro name entry map
+*
+SVNX     DSECT ,
+SVNXSVCI DS    XL1              SVC screening indicator
+SVNX@SOK EQU   X'00'            -screening allowed
+SVNX@SNO EQU   X'80'            -screening not allowed
+SVNXATTR DS    XL1              fixed SVC attributes
+SVNX@SGM EQU   X'80'            -GETMAIN SVC
+SVNX@SFM EQU   X'40'            -FREEMAIN SVC
+SVNX@SGF EQU   X'C0'            -GETMAIN/FREEMAIN SVC
+SVNX@AV8 EQU   X'08'            -available
+SVNX@AV4 EQU   X'04'            -available
+SVNX@AV2 EQU   X'02'            -available
+SVNX@AV1 EQU   X'01'            -available
+SVNXSVCN DS    XL1              SVC number
+SVNXSCNT DS    XL3              SVC issued count
+SVNXNAME DS    CL26             SVC macro name
+SVNX@NAM EQU   *-SVNXNAME       SVC macro name length
+SVNX@SZE EQU   *-SVNX
+*
+**       Subpool attributes map
+*
+SPNX     DSECT ,
+SPNXTYPE DS    XL1              subpool type
+SPNX@SQA EQU   X'80'            -SQA subpool
+SPNX@CSA EQU   X'40'            -CSA subpool
+SPNX@LSQ EQU   X'20'            -LSQA private subpool
+SPNX@PVT EQU   X'10'            -PRIVATE subpool
+SPNX@JST EQU   X'08'            -TCBJSTCB jobstep subpool
+SPNX@ALL EQU   X'00'            -ALL subpools default
+SPNXSPN  DS    AL1              subpool number
+SPNXACTN DS    XL1              action
+SPN@LOG  EQU   X'80'            -log audit record
+SPN@NLOG EQU   X'00'            -do not log record
+SPNXRSVR DS    XL1              -available
+SPNX@SZE EQU   *-SPNX
+*
+**       SVX screening instance map
+*
+SVX      DSECT ,
+SVXID    DS    CL4'SVX'         ID
+SVXSAVE  DS    18F              mainline savearea
+SVXSVSA  DS    18F              SVCSVS savearea
+SVXGENS  DS    18F              SVCSVS(BACKUP2) savearea
+SVXLGSVE DS    18F              RMSLOG mainline savearea
+SVXLGSSA DS    18F              RMSLOG subroutine savearea
+SVXRTRG  DS    16F              FRR retry registers
+SVXSVC   DS    0F
+SVXSVCNM DS    XL1              caller issued SVC number
+SVXSRID  DS    CL3              SRID={INI|END|TRM}
+         DS    0X
+SVXFLGS  DS    CL4'FLGS'        ID
+SVXFLG1  DS    XL1              SVCSVS flags
+SVX@ZFRR EQU   X'80'            SETFRR issued indicator
+SVX@SVCE EQU   X'40'            SVCE available indicator
+SVX@ZSVT EQU   X'20'            ZSVT available indicator
+SVX@UPDT EQU   X'10'            PSW updated indicator
+SVX@QUIT EQU   X'08'            Quit SVC screening indicator
+SVX@SUNA EQU   X'04'            user not authorized indicator      @02C
+SVX@BKP2 EQU   X'02'            SVCSVS(BACKUP2) caller indicator   @02C
+SVX@0107 EQU   X'01'            -available
+         DS    0X
+SVXFLG2  DS    XL1              SVCXIT flags
+SVX@UPOK EQU   X'80'            PSW update debug indicator
+SVX@SVCS EQU   X'40'            SVC screening debug indicator
+SVX@2RS2 EQU   X'20'            -available
+SVX@2RS3 EQU   X'10'            -available
+SVX@2RS4 EQU   X'08'            -available
+SVX@2RS5 EQU   X'04'            -available
+SVX@2RS6 EQU   X'02'            -available
+SVX@2RS7 EQU   X'01'            -available
+         DS    0X
+SVXFLG3  DS    XL1              common flags
+SVX@TYP6 EQU   X'80'            Type 6 SVC issued indicator
+SVX@ATTC EQU   X'40'            ATTACH SVC issued indicator
+SVX@SVRB EQU   X'20'            SVC issued by SVRB caller
+SVX@60CT EQU   X'10'            SVC issued by IEFIIC/IEFSD060 TCB
+SVX@STOR EQU   X'08'            GETMAIN/FREEMAIN SVC indicator
+SVX@LOGM EQU   X'04'            GETMAIN/FREEMAIN log indicator
+SVX@LOGQ EQU   X'02'            MONLOG ENQ/DEQ indicator
+SVX@3RS7 EQU   X'01'            -available
+         DS    0X
+SVXFLG4  DS    XL1              common flags
+SVX@AM31 EQU   X'80'            AMODE=31 PSW indicator
+SVX@DSV0 EQU   X'40'            -available
+SVX@DSV2 EQU   X'20'            -available
+SVX@DSV3 EQU   X'10'            -available
+SVX@DSV4 EQU   X'08'            -available
+SVX@DSV5 EQU   X'04'            -available
+SVX@DSV6 EQU   X'02'            -available
+SVX@DSV7 EQU   X'01'            -available
+         DS    0A
+SVXRC    DS    A                RC
+SVXRSN   DS    A                RSN
+SVXTCBA  DS    A                caller TCB address
+SVXRBA   DS    A                caller RB address
+SVXSVRB  DS    A                SVCSVS SVRB
+SVXXSBA  DS    A                XSB address
+SVXSIZE  DS    A                SVX size
+SVXSVXA  DS    A                SVX address
+SVXSVXEA DS    A                SVXE address
+SVXSVCEA DS    A                SVCE address
+SVXFRRA  DS    A                FRR workarea address
+SVXTOKEN DS    A                ESTAE delete token
+SVXEKEY  DS    A                entry key
+SVXWORD  DS    A                work area
+         DS    0D
+SVXCID   DS    CL4'CPSW'        ID
+SVXCPSW  DS    0XL8             SVC issuer RBOPSW
+SVXCPSW0 DS    XL4              -PSW bytes 0-3
+SVXCPSW4 DS    XL4              -PSW bytes 4-7
+SVXCRSV4 DS    XL4              -doubleword boundary
+         DS    0D
+SVXC8PSW DS    CL8              XSB PSW8 alalog
+SVXCRSV8 DS    XL8              -doubleword boundary
+SVXCFPSW DS    CL16             XSB PSW16 analog
+         DS    0D
+SVXIREGS DS    0XL32
+SVXIHR14 DS    XL4              entry high R14
+SVXILR14 DS    XL4              entry low R14
+SVXIHR15 DS    XL4              entry high R15
+SVXILR15 DS    XL4              entry low R15
+SVXIHR0  DS    XL4              entry high R0
+SVXILR0  DS    XL4              entry low R0
+SVXIHR1  DS    XL4              entry high R1
+SVXILR1  DS    XL4              entry low R1
+SVXI@RGS EQU   *-SVXIREGS       DONOT change order
+*
+SVXIARS  DS    0XL16
+SVXIAR14 DS    XL4              entry AR14
+SVXIAR15 DS    XL4              entry AR15
+SVXIAR0  DS    XL4              entry AR0
+SVXIAR1  DS    XL4              entry AR1
+SVXI@ARS EQU   *-SVXIARS        DONOT change order
+*
+SVXOHGRS DS    0XL16
+SVXOHR14 DS    XL4              return high R14
+SVXOHR15 DS    XL4              return high R15
+SVXOHR0  DS    XL4              return high R0
+SVXOHR1  DS    XL4              return high R1
+SVXO@HGR EQU   *-SVXOHGRS       DONOT change order
+*
+SVXOLGRS DS    0XL16
+SVXOLR14 DS    XL4              return low R14
+SVXOLR15 DS    XL4              return low R15
+SVXOLR0  DS    XL4              return low R0
+SVXOLR1  DS    XL4              return low R1
+SVXO@LGR EQU   *-SVXOLGRS       DONOT change order
+*
+SVXOARS  DS    0XL16
+SVXOAR0  DS    XL4              return AR0
+SVXOAR1  DS    XL4              return AR1
+SVXOAR14 DS    XL4              return AR14
+SVXOAR15 DS    XL4              return AR15
+SVXO@ARS EQU   *-SVXOARS        DONOT change order
+         DS    0D
+SVXPGMNM DS    CL8              SVC issuing PGMname
+SVXSVCEN DS    XL8              real SVCENTRY
+SVXMSGV1 DS    CL8              error msgID variable data          @02A
+         DS    0D
+SVXSVRDA DS    CL(SVR@SIZE)     SVR record
+SVX@SVRZ EQU   *-SVXSVRDA       SVR record length
+         DS    0D
+SVXPLIST DS    XL128            parmlist                           @02A
+         DS    0D
+SVX@SIZE EQU   *-SVX            SVX size
+*
+**       SVCE PSWhook entry map
+*
+SVXE     DSECT ,
+SVXEID   DS    CL4'SVXE'        ID
+SVXEHOOK DS    0F               PSWhook
+SVXESVCI DS    XL1'0A'          -PSWhook Opcode
+SVXESVCN DS    XL1'00'          -PSWhook caller SVC
+SVXESVCX DS    XL1'0A'          -PSWhook Opcode
+SVXEZRMS DS    XL1'FF'          -PSWhook server SVC
+SVXE@PFX EQU   *-SVXE           prefix
+SVXEFCID DS    XL2'FFFF'        -PSWhook FCID
+SVXEXCID DS    XL2'FFFF'        -PSWhook XCID
+SVXESVXA DS    A                SVX address
+SVXESVCE DS    A                SVCE address
+SVXEZSVT DS    A                ZSVT address
+SVXESVL4 DS    A                -available
+SVXESIZE DS    A                SVXE size
+         DS    0D
+SVXEIDC  DS    CL16'SVC-CALL-ANALOGS'
+SVXERPSW DS    XL08             caller-RBOPSW PSW
+SVXE8PSW DS    XL08             caller-PSW8 analog
+SVXEFPSW DS    XL16             caller-PSW16 analog
+         DS    0D
+SVXEIDH  DS    CL16'SVC-HOOK-ANALOGS'
+SVXEHRPW DS    XL08             PSWhook-RBOPSW PSW
+SVXEH8PW DS    XL08             PSWhook-PSW8 analog
+SVXEHFPW DS    XL16             PSWhook-PSW16 analog
+         DS    0D
+SVXEIDB  DS    CL16'SVC-BACK-ANALOGS'
+SVXEBRPW DS    XL08             BACKUP2-RBOPSW PSW
+SVXEB8PW DS    XL08             BACKUP2-PSW8 analog
+SVXEBFPW DS    XL16             BACKUP2-PSW16 analog
+         DS    0D
+SVXE@SZE EQU   *-SVXE           size of SVXE
+*
+**       ZTRCE trace entry request map
+*
+ZTRCE    DSECT ,
+ZTRCETRC DS    XL2              &ZTRC instruction
+ZTRCEDED DS    XL2              &ZTRC DEAD instruction
+ZTRCE@SZ EQU   *-ZTRCE          size of ZTRC map
+
+*
+**       SVC auditing data record
+*
+SVR      DSECT ,
+SVRID    DS    CL4'SVR'         ID
+SVRAR    DS    CL1              AR-mode {Y|N}
+SVRTYPE  DS    CL1              SVC type {1|2|3|4|6}
+SVRNONP  DS    CL1              non-preemptive {Y|N}
+SVRATTR1 DS    XL1              CSVQUERY OUTATTR1 attributes
+SVRATTR2 DS    XL1              CSVQUERY OUTATTR2 attributes
+SVRATTR3 DS    XL1              CSVQUERY OUTATTR3 attributes
+SVRSPN   DS    XL1              binary subpool
+SVRPKEY  DS    CL1              caller PSW protect key
+SVRSTKEY DS    CL1              storage key
+SVRSTSPN DS    CL3              storage subpool
+SVRAPF   DS    CL3              APF authorization {YES|NO}
+SVRSVCN  DS    CL3              SVC number {000}255}
+SVRAC01  DS    CL5              SETCODE AC={0|1}
+SVRCOUNT DS    CL6              SVC issued count
+SVRLOCK  DS    CL8              SVC lock requirement
+SVRBTYPE DS    CL4              SVC caller {PRB|SVRB}
+SVRSEQNT DS    CL8              SVC issued sequence number
+SVRJOBNM DS    CL8              job name
+SVRSTEPN DS    CL8              step name
+SVRPGMEP DS    CL8              SVC issuer EPA
+SVRPGMOF DS    CL8              SVC issued at address
+SVRSTATE DS    CL12             system state {Problem|Supervisor}
+SVRSTGAD DS    CL8              GETMAIN/FREEMAIN storage address
+SVRSTGLN DS    CL8              GETMAIN/FREEMAIN storage length
+*
+SVRCPILA DS    CL4              SVC issued on logical CPU
+SVRCPIPA DS    CL4              SVC issued on physical CPU
+SVRCPOLA DS    CL4              SVC completed on logical CPU
+SVRCPOPA DS    CL4              SVC completed on physical CPU
+         DS    0D
+SVRSTCK  DS    XL8              SVC entry/return STCK value
+SVRTIME  DS    PL4              TIME macro (BIN INTERVAL TOD)
+SVRDATE  DS    AL4              packed decimal date (00YYDDDF)
+*
+SVRIHR14 DS    CL8              entry high R14
+SVRILR14 DS    CL8              entry low R14
+SVRIHR15 DS    CL8              entry high R15
+SVRILR15 DS    CL8              entry low R15
+SVRIHR0  DS    CL8              entry high R0
+SVRILR0  DS    CL8              entry low R0
+SVRIHR1  DS    CL8              entry high R1
+SVRILR1  DS    CL8              entry low R0
+         DS    0D
+SVRIAR14 DS    CL8              entry AR14
+SVRIAR15 DS    CL8              entry AR15
+SVRIAR0  DS    CL8              entry AR0
+SVRIAR1  DS    CL8              entry AR1
+SVR@ZERO EQU   *-SVR            scrub length
+*
+SVRCLR   DS    0D
+SVROHR0  DS    CL8              return high R0
+SVROLR0  DS    CL8              return low R0
+SVROHR1  DS    CL8              return high R1
+SVROLR1  DS    CL8              return low R0
+SVROHR14 DS    CL8              return high R14
+SVROLR14 DS    CL8              return low R14
+SVROHR15 DS    CL8              return high R15
+SVROLR15 DS    CL8              return low R15
+         DS    0D
+SVROAR0  DS    CL8              return AR0
+SVROAR1  DS    CL8              return AR1
+SVROAR14 DS    CL8              return AR14
+SVROAR15 DS    CL8              return AR15
+         DS    0F
+SVRVAR   DS    CL8              -data
+SVRVARX  DS    CL1              -slack byte
+SVR@VARZ EQU   *-SVRVAR         keep it together
+         DS    0F
+SVRRC    DS    F                RC
+SVRWORD  DS    F                a word
+SVROFSET DS    F                PSW where SVC was issued
+SVREPA   DS    F                CSVQUERY OUTEPNM
+SVRLODPT DS    F                CSVQUERY OUTLOADPT
+SVREPNM  DS    CL8              CSVQUERY OUTEPA
+SVRMJNM  DS    CL8              CSVQUERY OUTMJNM
+SVRLODEP DS    CL8              CSVQUERY OUTLOADPT
+SVRDWORD DS    D                a doubleword
+         DS    0D
+SVRISTCK DS    CL16             SVC STCKCONV work area
+SVRTMAP  DS    CL38             time and date map
+SVRTIMED DS    CL38             converted time and date
+SVR@ZEND EQU   *-SVRCLR         scrub length
+         DS    0D
+SVRTRTAB DS    CL16             translate table
+SVRSVCNI DS    XL1              SVC screening indicator
+SVRSVCNM DS    XL1              SVC number
+SVRMACRO DS    CL(SVNX@NAM)     SVC macro name
+         DS    0D
+SVRCCONV DS    CL32             STCKCONV listform
+         DS    0D
+SVRPLIST CSVQUERY PLISTVER=MAX,MF=(L,ZVR)
+         DS    0D
+SVR@SIZE EQU   *-SVR            SVR size
+*
+**       MONLOG DCB map
+*
+LGXE     DSECT ,
+LGXEID   DS    CL4'LGXE'        ID
+LGXERECS DS    F                records count
+LGXESIZE DS    F                LGXE size
+LGXEAVL1 DS    F                -available
+LGXEOLFM DS    D                OPEN listform
+LGXECLFM DS    D                CLOSE listform
+LGXEDID  DS    CL4'DCB'         ID
+LGXEDCB  DS    CL(DCBLNGQS)     DCB block
+LGXEDCBL EQU   *-LGXEDCB        DCB block length
+         DS    0C
+LGXELOGR DS    CL80             MONLOG record
+LGXELOGL EQU   *-LGXELOGR       MONLOG record length
+         DS    0D
+LGXE@SZE EQU   *-LGXE           LGXE size
+*
+**       SMFTAB table
+*
+SMFT     DSECT
+SMFTID   DS    CL4'SMFT'        ID
+SMFTFRST DS    A                first SMFE record slot
+SMFTLAST DS    A                last SMFE record slot
+SMFTFREE DS    A                free SMFE record slot
+SMFTCURR DS    A                current record slot
+SMFTSUSE DS    A                in use SMFE record slots
+SMFTSREC DS    A                current SMF record size
+SMFTRMAX DS    A                maximum record size
+SMFTIFRC DS    A                current SMFWTM RC
+SMFTRSV2 DS    A                -available
+*
+**       Record header segment
+*
+SMFTHDR  DS    H                align for date & time
+SMFTREC  DS    0CL18            record header
+SMFTLEN  DS    BL2              record length
+SMFTSEG  DS    BL2              segment descriptor
+SMFTFLG  DS    BL1              header flag byte
+SMFTYPE  DS    BL1              record type (SMF=nnn option)
+SMFTTIME DS    BL4              TIME macro (BIN INTERVAL TOD)
+SMFTDATE DS    PL4              packed decimal date (00YYDDDF)
+SMFTSID  DS    CL4              system identifier
+*
+**       Audit data section
+*
+SMFTMAIN DS    0F
+SMFTSMFE DS    BL2              fixed SMFE record length
+SMFTSMFN DS    BL2              inuse SMFE record count
+SMFTSUB  DS    CL4              subsystem name
+SMFTJOB  DS    CL8              job name
+SMFTSTEP DS    CL8              step name
+SMFTVER  DS    CL8              subsystem version
+         DS    0D
+SMFT@SZE EQU   *-SMFT           SMFT length
+SMFT@HDR EQU   *-SMFTHDR        header size
+*
+**       Audit data subsection
+*
+SMFE     DSECT ,
+SMFEPGM  DS    CL8              program name
+SMFESVCN DS    CL8              SVC macro name
+SMFESEQN DS    CL8              issued SVC sequence number
+SMFELOAD DS    BL4              program load point address
+SMFEADDR DS    BL4              program entry address
+SMFEOSET DS    BL4              program offset where SVC issued
+SMFEITME DS    BL4              time SVC was issued (BIN INTERVAL TOD)
+SMFEIDTE DS    PL4              date SVC was issued (00YYDDDF)
+*
+SMFESVC  DS    BL1              SVC number {000-255}
+SMFEAC   DS    CL1              Authorization code (AC) {0|1}
+SMFEKEY  DS    CL1              storage protect key
+SMFESVCT DS    CL1              SVC type
+SMFENONP DS    CL1              non-preemptive {Y|N}
+SMFEMODE DS    CL1              system mode {P|S}
+SMFEFRE0 DS    CL4              -available
+*
+SMFEFRE1 DS    CL3              -available
+SMFESPN  DS    BL1              storage subpool {00-FF} or zero
+SMFESTGA DS    BL4              GETMAIN/FREEMAIN address or zero
+SMFESTGL DS    BL4              GETMAIN/FREEMAIN length  or zero
+*
+SMFEIPCP DS    CL4              SVC issued on CPU
+SMFEILCP DS    CL4              SVC issued on logical CPU
+SMFEOPCP DS    CL4              SVC completed on CPU
+SMFEOLCP DS    CL4              SVC completed on logical CPU
+*
+**       SVC entry regs
+*
+SMFEIAR0 DS    BL4              SVC entry AR0
+SMFEIAR1 DS    BL4              SVC ettry AR1
+SMFEIARE DS    BL4              SVC entry AR14
+SMFEIARF DS    BL4              SVC entry AR15
+*
+SMFEIHR0 DS    BL4              SVC entry high R0
+SMFEILR0 DS    BL4              SVC entry low  R0
+SMFEIHR1 DS    BL4              SVC entry high R1
+SMFEILR1 DS    BL4              SVC entry low  R1
+SMFEIHRE DS    BL4              SVC entry high R14
+SMFEILRE DS    BL4              SVC entry low  R14
+SMFEIHRF DS    BL4              SVC entry high R15
+SMFEILRF DS    BL4              SVC entry low  R15
+*
+**       SVC return regs
+*
+SMFEOAR0 DS    BL4              SVC return AR0
+SMFEOAR1 DS    BL4              SVC return AR1
+SMFEOARE DS    BL4              SVC return AR14
+SMFEOARF DS    BL4              SVC return AR15
+*
+SMFEOHR0 DS    BL4              SVC return high R0
+SMFEOLR0 DS    BL4              SVC return low  R0
+SMFEOHR1 DS    BL4              SVC return high R1
+SMFEOLR1 DS    BL4              SVC return low  R1
+SMFEOHRE DS    BL4              SVC return high R14
+SMFEOLRE DS    BL4              SVC return low  R14
+SMFEOHRF DS    BL4              SVC return high R15
+SMFEOLRF DS    BL4              SVC return low  R15
+         DS    0D
+SMFE@SZE EQU   *-SMFE           record length
+         MEND  ,

@@ -1,0 +1,129 @@
+RMSFRR   CSECT
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        RMSFRR                                              */
+*/*                                                                  */
+*/* Function:    FRR Recovery Termination Manager                    */
+*/*                                                                  */
+*/* Description: Performs recovery on behalf ZRMS subsystem          */
+*/*              locked service routines.                            */
+*/*                                                                  */
+*/* Input Regs:  R1  SDWA address                                    */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  FRR address                                     */
+*/*              R8  SDWA address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*                                                                  */
+*/* Output Regs: R14 Return address                                  */
+*/*                                                                  */
+*/* Attributes:  TCB mode                                            */
+*/*              Primary mode                                        */
+*/*              Reentrant                                           */
+*/*              Key 0                                               */
+*/*              Supervisor state                                    */
+*/*              Page-fixed                                          */
+*/*              Write-protected                                     */
+*/*              Dynamic-LPA resident                                */
+*/*                                                                  */
+*/* Copyright:   Ben Marino. 2021 - 2023 (unpublished)               */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @01 | V1R1 | 09242022 | Ben Marino  | Initial version               *
+*     |      |          |             |                               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+RMSFRR   AMODE 31
+RMSFRR   RMODE ANY
+         USING RMSFRR,R15              entry
+         B     FRRMAIN                 branch
+         ZMACS GEN=MID,DSECT=NO        module ID
+         DROP  R15
+*
+FRRMAIN  DS    0H
+         LR    R10,R15                 base
+         USING RMSFRR,R10
+         LR    R8,R1                   SDWA address
+         USING SDWA,R8
+         L     R7,SDWAPARM             FRR parm area
+         USING FRR,R7
+         L     R9,FRRZRWA              SRWA address
+         USING ZRWA,R9
+*
+**       Retry recursion check
+*
+         TM    SDWAERRD,SDWACLUP       clean up only?
+         BNZ   ABEND                   yes, percolate
+         TM    SDWAERRC,SDWAPERC       percolated ABEND?
+         BNZ   ABEND                   yes, percolate
+         TM    FRRFLG1,FRR@RECR        recursive ABEND?
+         BNZ   ABEND                   yes, percolate
+         OI    FRRFLG1,FRR@RECR        set recursion indicator
+*
+**       Retry Routine
+*
+RETRY    DS    0H
+         ICM   R3,15,ZRWARTRY          retry address init?
+         BZ    ABEND                   no, percolate
+         MVC   SDWASRSV,ZRWAGPRS       set retry regs
+         MVC   SDWACSCT,ZRWASECT       routine name
+         SETRP RC=4,                                                   +
+               RETADDR=(3),            retry address                   +
+               RETREGS=YES,            restore registers               +
+               FRELOCK=LOCAL,          release LOCAL lock              +
+               WKAREA=(8)              SDWA address
+         BR    R14                     return to RTM
+*
+**       Percolate routine
+*
+ABEND    DS    0H
+         TM    FRRFLG1,FRR@DUMP        SDUMP requested?
+         BZ    ABEND00                 no
+         SETRP DUMP=YES,WKAREA=(8)     yes
+*
+ABEND00  DS    0H
+         TM    FRRFLG1,FRR@LOGR        LOGREC requested?
+         BZ    ABEND10                 no
+         SETRP RECORD=YES,WKAREA=(8)   yes
+*
+ABEND10  DS    0H
+         MVC   SDWARECP,ZFRRPARM       recovery parm
+         MVC   SDWACSCT,ZRWASECT       routine name
+         SETRP RC=0,WKAREA=(8)         percolate ABEND
+         BR    R14                     return to RTM
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+ZFRRPARM DS    0CL24
+         DC    CL8'RMSSVS'             Router name
+         DC    CL8'RMS???'             Routine name
+         DC    CL8'RMSFRR'             Recovery routine name
+ZFRR@SZE EQU   *-ZFRRPARM              parms size
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*---------------------------------------------------------------------*
+*        Server Data Areas                                            *
+*--------+---------+---------+---------+---------+---------+---------+*
+         PRINT NOGEN
+         ZSVT  ,
+         ZRWA  ,
+         ZGEQU ,
+*---------------------------------------------------------------------*
+*        System Data Areas                                            *
+*--------+---------+---------+---------+---------+---------+---------+*
+         PRINT NOGEN
+         IHAPSA ,
+         CVT   DSECT=YES
+         IHAFRRS ,
+         IHASDWA ,
+         END
